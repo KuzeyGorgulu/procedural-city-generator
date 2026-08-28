@@ -15,7 +15,7 @@ export interface UrbanGenerationConfig {
   readonly areaToleranceRatio: number;
 }
 
-/** Constants are part of the phase-3.0 deterministic generation behavior. */
+/** Phase 3.0 urban constants remain unchanged by Phase 3.5 morphology work. */
 export const URBAN_CONFIG: UrbanGenerationConfig = {
   geometryEpsilon: 1e-7,
   minBlockArea: 3_000,

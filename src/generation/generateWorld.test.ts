@@ -3,6 +3,18 @@ import { GENERATOR_VERSION } from '../core/generatorVersion';
 import { generateWorld } from './generateWorld';
 
 describe('generateWorld', () => {
+  it('uses the Phase 3.5 generator contract', () => {
+    const world = generateWorld({ seed: 'phase-3.5-contract' });
+    expect(GENERATOR_VERSION).toBe('phase-3.5');
+    expect(world.metadata.generatorVersion).toBe('phase-3.5');
+    expect(world.roads).toEqual(
+      generateWorld({ seed: 'phase-3.5-contract' }).roads,
+    );
+    expect(world.urban).toEqual(
+      generateWorld({ seed: 'phase-3.5-contract' }).urban,
+    );
+  });
+
   it('returns deeply identical worlds for the same seed and version', () => {
     const input = { seed: 'istanbul-1453', generatorVersion: GENERATOR_VERSION };
     expect(generateWorld(input)).toEqual(generateWorld(input));

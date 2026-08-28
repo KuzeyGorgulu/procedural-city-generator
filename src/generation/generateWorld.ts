@@ -36,7 +36,7 @@ export function generateWorld({
   const roads = generateRoads({
     bounds: WORLD_BOUNDS,
     terrain,
-    rng: rootRng.fork('roads/v1'),
+    rng: rootRng.fork('roads/v2'),
     config: ROAD_CONFIG,
   });
   const urban = generateUrbanStructure({

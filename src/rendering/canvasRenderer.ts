@@ -7,6 +7,10 @@ import type {
   World,
 } from '../world/types';
 import type { Camera, ViewportSize } from './viewport';
+import {
+  estimateCellElevationGradient,
+  getHillshadeBrightness,
+} from './terrainRelief';
 import { screenToWorld, worldToScreen } from './viewport';
 
 export type WorldViewMode =
@@ -31,12 +35,22 @@ function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
-function mixColor(from: Rgb, to: Rgb, amount: number): string {
+function mixColor(from: Rgb, to: Rgb, amount: number): Rgb {
   const blend = clamp01(amount);
   const red = Math.round(from[0] + (to[0] - from[0]) * blend);
   const green = Math.round(from[1] + (to[1] - from[1]) * blend);
   const blue = Math.round(from[2] + (to[2] - from[2]) * blend);
-  return `rgb(${red} ${green} ${blue})`;
+  return [red, green, blue];
+}
+
+function colorToCss(color: Rgb): string {
+  return `rgb(${color[0]} ${color[1]} ${color[2]})`;
+}
+
+function applyBrightness(color: Rgb, brightness: number): Rgb {
+  const shade = (channel: number) =>
+    Math.round(Math.min(255, Math.max(0, channel * brightness)));
+  return [shade(color[0]), shade(color[1]), shade(color[2])];
 }
 
 function getCellAverage(
@@ -55,7 +69,7 @@ function getCellAverage(
   );
 }
 
-function elevationColor(terrain: TerrainData, elevation: number): string {
+function elevationColor(terrain: TerrainData, elevation: number): Rgb {
   if (elevation <= terrain.seaLevel) {
     return mixColor(
       DEEP_WATER,
@@ -72,7 +86,7 @@ function elevationColor(terrain: TerrainData, elevation: number): string {
   return mixColor(HIGH_LAND, PEAK, (landHeight - 0.7) / 0.3);
 }
 
-function slopeColor(slope: number): string {
+function slopeColor(slope: number): Rgb {
   if (slope < 0.5) {
     return mixColor([25, 42, 53], [224, 170, 77], slope / 0.5);
   }
@@ -84,12 +98,13 @@ function terrainColor(
   elevation: number,
   slope: number,
   mode: TerrainViewMode,
+  hillshade: number,
 ): string {
-  if (mode === 'slope') return slopeColor(slope);
+  if (mode === 'slope') return colorToCss(slopeColor(slope));
   if (mode === 'water') {
     return elevation <= terrain.seaLevel ? 'rgb(25 91 128)' : 'rgb(117 134 103)';
   }
-  return elevationColor(terrain, elevation);
+  return colorToCss(applyBrightness(elevationColor(terrain, elevation), hillshade));
 }
 
 function drawTerrain(
@@ -139,6 +154,14 @@ function drawTerrain(
     for (let column = firstColumn; column <= lastColumn; column += 1) {
       const elevation = getCellAverage(terrain, terrain.elevation, column, row);
       const slope = getCellAverage(terrain, terrain.slope, column, row);
+      const topLeft = row * terrain.columns + column;
+      const gradient = estimateCellElevationGradient(
+        terrain.elevation[topLeft],
+        terrain.elevation[topLeft + 1],
+        terrain.elevation[topLeft + terrain.columns],
+        terrain.elevation[topLeft + terrain.columns + 1],
+      );
+      const hillshade = getHillshadeBrightness(gradient);
       const screen = worldToScreen(
         {
           x: terrain.origin.x + column * terrain.cellSize,
@@ -148,7 +171,13 @@ function drawTerrain(
         viewport,
       );
 
-      context.fillStyle = terrainColor(terrain, elevation, slope, mode);
+      context.fillStyle = terrainColor(
+        terrain,
+        elevation,
+        slope,
+        mode,
+        hillshade,
+      );
       context.fillRect(
         screen.x,
         screen.y,

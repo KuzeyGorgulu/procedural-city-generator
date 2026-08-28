@@ -22,7 +22,7 @@ export function App() {
     <main className="app-shell">
       <header className="app-header">
         <div>
-          <p className="eyebrow">Phase 3 · Urban Structure</p>
+          <p className="eyebrow">Phase 3.5 · City Morphology</p>
           <h1>Procedural City Generator</h1>
           <p className="subtitle">A deterministic world, one seed at a time.</p>
         </div>

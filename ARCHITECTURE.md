@@ -1,8 +1,8 @@
-# Phase 3 Architecture
+# Phase 3.5 Architecture
 
 ## Goal and deterministic contract
 
-Procedural City Generator now has a deterministic foundation, queryable terrain, a terrain-responsive planar road graph, and explicit road-bounded blocks and parcels. Phase 3 turns road topology into reusable urban geometry without adding zoning or buildings.
+Procedural City Generator has a deterministic foundation, queryable terrain, a terrain-responsive planar road graph, and explicit road-bounded blocks and parcels. Phase 3.5 refines the city skeleton with broader regional coverage, less rigid canonical road geometry, and readable terrain relief without adding zoning or buildings.
 
 The project contract remains:
 
@@ -12,7 +12,7 @@ The project contract remains:
 
 For identical inputs, `generateWorld` returns deeply identical, JSON-serializable data. Generation has no clock, browser, React, rendering, viewport, or ambient random-state dependency.
 
-`GENERATOR_VERSION` is `phase-3.0`. It was deliberately bumped because `World.urban` changes the generated world contract. Only the current generator remains executable; historical generators and save migrations are deferred until persistence requirements are known.
+`GENERATOR_VERSION` is `phase-3.5`. It was deliberately bumped because arterial selection, road geometry, and therefore blocks and parcels changed. Only the current generator remains executable; historical generators and save migrations are deferred until persistence requirements are known.
 
 ## Modules and boundaries
 
@@ -22,8 +22,9 @@ src/
   generation/
     terrain/                    Phase 1 heightfield generation
     roads/
-      config.ts                 explicit Phase 2 constants
+      config.ts                 explicit Phase 3.5 morphology constants
       pathfinder.ts             generation-only terrain-aware A*
+      refineRoadPath.ts         terrain-validated canonical route shaping
       roadGraphBuilder.ts       graph construction and intersection handling
       generateRoads.ts          anchors, arterials, and secondary loops
     urban/
@@ -39,11 +40,15 @@ src/
     roadQueries.ts              graph lookups, nearest road, statistics
     polygonGeometry.ts          canonical polygon geometry and validation
     urbanQueries.ts             block/parcel lookups, containment, statistics
-  rendering/                    Canvas visualization and camera transforms
+    morphologyQueries.ts        derived coverage and spatial-spread metrics
+  rendering/
+    terrainRelief.ts            pure fixed-light hillshade helpers
+    canvasRenderer.ts           Canvas world visualization
+    viewport.ts                 camera transforms
   app/, ui/, utils/             application and browser boundaries
 ```
 
-Road and urban generation depend on terrain exclusively through `sampleTerrain`. They do not read the heightfield arrays, import Canvas code, or depend on viewport state. Temporary graph mutation, A* state, and half-edge traversal state are confined to generation; `World` receives only plain serializable arrays and objects.
+Road and urban generation depend on terrain exclusively through `sampleTerrain` and terrain traversal queries. They do not read the heightfield arrays, import Canvas code, or depend on viewport state. Temporary graph mutation, A* state, route refinement, and half-edge traversal state are confined to generation; `World` receives only plain serializable arrays and objects.
 
 ## Road graph representation
 
@@ -69,9 +74,16 @@ Node and edge IDs use deterministic zero-padded generation counters such as `roa
 The world root RNG is keyed by generator version and normalized seed. Roads receive an independent named domain:
 
 ```text
-roads/v1
-  arterial-v1
-  secondary-v1
+roads/v2
+  anchors-v2
+  morphology-v1/arterials
+    anchor-##-##
+      segment-###
+  secondary-expansion-v1
+    pair-priority-v1
+    loop/<attachment-pair>
+      morphology/side-<side>
+        segment-###
 urban/v1
   parcels-v1/block-####
     target-area
@@ -80,13 +92,17 @@ urban/v1
 
 Terrain remains under `terrain/v1`. Block extraction is deterministic and consumes no randomness. Each block's parcels use a block-local stream; because forks derive from immutable stream keys, generating another block or consuming an unrelated domain cannot shift existing parcel geometry.
 
-## Candidate anchors and arterial strategy
+## Regional anchors and arterial strategy
 
-Arterial candidates are inspected on an explicit 100-unit world grid inside a 150-unit boundary margin. Candidates must be land with normalized slope at or below `0.5`. A central, low-cost hub is selected first. Additional anchors use deterministic farthest-point selection with seeded jitter and a minimum 320-unit separation, producing broad geographic coverage rather than scattered endpoints.
+Arterial candidates are inspected on an explicit 100-unit world grid inside a 150-unit boundary margin. Candidates must be land with normalized slope at or below `0.5`. A primary anchor is chosen near the centroid of viable candidates. The usable world is then divided into a 3-by-2 set of broad regions; each viable region contributes its best low-slope representative when separation permits. Deterministic farthest-point selection fills the remaining budget of nine anchors with a 300-unit minimum separation.
 
-Each new anchor connects to the nearest already-connected anchor that can be reached. Routes are generated by the terrain-aware A* search and added to the same graph, so the arterial structure grows as one coherent component. Failed candidates are skipped rather than forcing an absurd path through impassable terrain.
+All anchor pairs are ranked by distance with stable index tie-breaks. A deterministic disjoint-set spanning pass routes the shortest feasible links that join different anchor components. This avoids making every early regional connection radiate from the primary anchor while retaining regional connectivity. Failed pairs are skipped in favor of later feasible links rather than forcing a route through impassable terrain.
 
-Collinear A* steps are simplified into longer straight graph edges. The simplification removes only points on an already-validated straight run; it does not create new shortcuts through terrain.
+## Canonical road geometry refinement
+
+Collinear A* steps are first simplified without introducing shortcuts. Direction changes are then rounded with short quadratic samples, and long straight runs receive one shallow deterministic bow. Arterial and secondary roads use separate radius and offset settings. The result is still a chain of straight canonical graph edges, not a renderer-only spline.
+
+Every new chord is checked with the same terrain traversal policy and 25-unit sampling interval used by routing. If neither lateral direction is passable, the segment falls back to a collinear subdivision. No emitted chain segment exceeds the configured 180-unit cap, endpoints remain unchanged, and `RoadGraphBuilder` continues resolving every at-grade crossing into shared nodes.
 
 ## Terrain cost and deterministic A*
 
@@ -98,15 +114,15 @@ Water is fully impassable in Phase 2. Any sample with slope above `0.82` is also
 distance * (1 + slopePenalty * meanSquaredSlope) + turnPenalty
 ```
 
-Arterials use slope penalty `8` and turn penalty `22`; secondaries use slope penalty `5` and turn penalty `8`. This makes arterials favor broad flat corridors and lower curvature while allowing secondary roads somewhat more local flexibility. Slope comes from Phase 1 finite differences and is never generated independently.
+Arterials use slope penalty `12` and turn penalty `14`; secondaries use slope penalty `7` and turn penalty `6`. The stronger slope signal makes broad corridors respond more visibly to relief, while the lower turn penalties let A* choose useful gradual changes that the canonical refinement pass can shape. Slope comes from Phase 1 finite differences and is never generated independently.
 
 Search state includes incoming direction so turn cost remains correct. The open-set comparator is explicit and stable: total cost, heuristic, grid index, then direction index. Equal tentative costs prefer the lower prior state index, and neighbor order is fixed. The search never relies on object enumeration or unstable heap behavior.
 
 ## Secondary-road strategy
 
-Secondary attachment candidates include arterial nodes plus deterministic samples along long arterial edges. Nearby pairs 220–480 units apart are considered in seeded priority order. A successful secondary feature offsets both attachments by 110–210 units and routes three terrain-aware sections, producing a short loop back to the arterial network.
+Secondary attachment candidates include arterial nodes plus deterministic samples along long arterial edges. Nearby pairs 200–520 units apart receive stable pair-local priorities. The first attempt is chosen near the network center; later attempts maximize distance from successful loop midpoints with a bounded seeded jitter. This farthest-covered policy spends the loop budget across distinct arterial regions rather than wherever a global random ordering happens to succeed.
 
-This loop strategy provides local connectivity and potential enclosed regions while avoiding thousands of random fragments. Up to ten loops are attempted with spacing between loop midpoints. A loop is added only if all three path sections succeed; partial disconnected fragments are not emitted.
+Each successful feature offsets both attachments by 105–205 units and routes three terrain-aware sections, producing a closed loop back to the arterial network. Up to fourteen loops are emitted with 190-unit midpoint spacing and a hard 180-pair attempt cap. A loop is added only if all three sections succeed; partial disconnected fragments are never emitted. The assembled loop receives the same canonical corner and long-run refinement as arterials.
 
 ## Snapping, intersections, and duplicates
 
@@ -179,9 +195,13 @@ Subdivision targets a deterministic block-local area from `9,000` through `15,00
 
 The public query layer provides ID lookup, parcels by block, point containment, polygon centroids, and derived counts/areas. No spatial index is introduced at the current scale. Statistics are derived rather than duplicated in canonical world data.
 
+`getMorphologyStatistics` adds lightweight tuning diagnostics without changing the world schema. It samples viable land through `sampleTerrain`, measures the fraction within 220 units of a road, compares road and block-centroid extents with viable-land extent, and reports long arterial edges. The configured 200-unit sample grid is deliberately coarse: these values support broad multi-seed regression checks, not gameplay or GIS analysis.
+
 ## Rendering and debug views
 
 Canvas renders terrain, then neutral block fills, parcel boundaries/frontage, and finally roads. Blocks and Parcels modes expose urban geometry without implying zoning. Elevation, slope, water/land, and road-graph views remain available. Road graph mode mutes terrain and highlights graph intersections.
+
+Elevation colors receive fixed-light hillshade derived from each cell's elevation gradient. The pure helper approximates a surface normal with explicit vertical exaggeration, ambient light, and a northwestern light vector. This derived brightness is deterministic and rendering-only: it does not modify elevation, slope, terrain queries, routing, or canonical world data. The stronger elevation view remains subtle beneath roads and urban overlays.
 
 Rendering never changes world data and is not consulted during generation.
 
@@ -193,4 +213,4 @@ Future traffic can continue deriving routing adjacency from the road graph and a
 
 ## Intentionally deferred
 
-Phase 3 does not implement coastline- or world-boundary-generated blocks, terrain clipping, curved parcel boundaries, cadastral realism, ownership, alleys, driveways, sidewalks, parking, zoning, buildings, parks as gameplay, population, economy, traffic, or dynamic subdivision. Bridges and grade separation also remain absent. These are intentional scope boundaries, not data inferred in rendering.
+Phase 3.5 does not implement coastline- or world-boundary-generated blocks, terrain clipping, curved parcel boundaries, cadastral realism, ownership, alleys, driveways, sidewalks, parking, zoning, buildings, parks as gameplay, population, economy, traffic, or dynamic subdivision. Bridges and grade separation also remain absent. These are intentional scope boundaries, not data inferred in rendering.

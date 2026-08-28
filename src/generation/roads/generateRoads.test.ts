@@ -8,7 +8,7 @@ import { generateWorld } from '../generateWorld';
 import { TERRAIN_CONFIG } from '../terrain/config';
 import { generateTerrain } from '../terrain/generateTerrain';
 import { ROAD_CONFIG } from './config';
-import { generateRoads } from './generateRoads';
+import { generateRoads, selectArterialAnchors } from './generateRoads';
 
 const BOUNDS: WorldBounds = { x: 0, y: 0, width: 2_400, height: 1_600 };
 
@@ -41,6 +41,54 @@ function assertNoUnresolvedCrossings(graph: RoadGraph): void {
 }
 
 describe('generateRoads', () => {
+  it('distributes arterial anchors across broad viable regions', () => {
+    const columns = 49;
+    const rows = 33;
+    const terrain = {
+      origin: { x: 0, y: 0 },
+      width: BOUNDS.width,
+      height: BOUNDS.height,
+      columns,
+      rows,
+      cellSize: 50,
+      seaLevel: 0.2,
+      slopeNormalization: 0.14,
+      elevation: Array(columns * rows).fill(0.8),
+      slope: Array(columns * rows).fill(0),
+    };
+    const anchors = selectArterialAnchors(
+      BOUNDS,
+      terrain,
+      createSeededRng('distributed-anchors'),
+      ROAD_CONFIG,
+    );
+    const representedRegions = new Set(
+      anchors.map((anchor) => {
+        const column = Math.min(
+          ROAD_CONFIG.anchorRegionColumns - 1,
+          Math.floor((anchor.x / BOUNDS.width) * ROAD_CONFIG.anchorRegionColumns),
+        );
+        const row = Math.min(
+          ROAD_CONFIG.anchorRegionRows - 1,
+          Math.floor((anchor.y / BOUNDS.height) * ROAD_CONFIG.anchorRegionRows),
+        );
+        return `${column},${row}`;
+      }),
+    );
+
+    expect(anchors).toHaveLength(ROAD_CONFIG.arterialAnchorCount);
+    expect(representedRegions.size).toBe(
+      ROAD_CONFIG.anchorRegionColumns * ROAD_CONFIG.anchorRegionRows,
+    );
+    for (let first = 0; first < anchors.length; first += 1) {
+      for (let second = first + 1; second < anchors.length; second += 1) {
+        expect(pointDistance(anchors[first], anchors[second])).toBeGreaterThanOrEqual(
+          ROAD_CONFIG.minimumAnchorSeparation,
+        );
+      }
+    }
+  });
+
   it('reproduces an identical graph for the same seed and version', () => {
     expect(generateWorld({ seed: 'road-repeatability' }).roads).toEqual(
       generateWorld({ seed: 'road-repeatability' }).roads,
@@ -120,7 +168,9 @@ describe('generateRoads', () => {
   });
 
   it('resolves all non-parallel geometric crossings into shared nodes', () => {
-    assertNoUnresolvedCrossings(generateWorld({ seed: 'intersection-check' }).roads);
+    for (const seed of ['phase-zero', 'istanbul-1453', 'intersection-check']) {
+      assertNoUnresolvedCrossings(generateWorld({ seed }).roads);
+    }
   });
 
   it('survives JSON serialization without meaningful data loss', () => {
@@ -139,13 +189,13 @@ describe('generateRoads', () => {
     const afterUnrelatedUse = generateRoads({
       bounds: BOUNDS,
       terrain,
-      rng: consumedRoot.fork('roads/v1'),
+      rng: consumedRoot.fork('roads/v2'),
       config: ROAD_CONFIG,
     });
     const fresh = generateRoads({
       bounds: BOUNDS,
       terrain,
-      rng: createSeededRng('road-isolation').fork('roads/v1'),
+      rng: createSeededRng('road-isolation').fork('roads/v2'),
       config: ROAD_CONFIG,
     });
     expect(afterUnrelatedUse).toEqual(fresh);
