@@ -1,14 +1,24 @@
 import { useMemo, useState } from 'react';
 import { useWorldGeneration } from './useWorldGeneration';
+import { useTrafficSimulation } from './useTrafficSimulation';
 import type { WorldViewMode } from '../rendering/canvasRenderer';
 import { GenerationControls } from '../ui/GenerationControls';
 import { WorldCanvas } from '../ui/WorldCanvas';
+import { TrafficControls } from '../ui/TrafficControls';
 import { getRoadStatistics } from '../world/roadQueries';
 import { getUrbanStatistics } from '../world/urbanQueries';
 
 export function App() {
   const { seedInput, setSeedInput, world, generate, randomize } = useWorldGeneration();
+  const traffic = useTrafficSimulation(world);
   const [viewMode, setViewMode] = useState<WorldViewMode>('parcels');
+  const [selectedVehicle, setSelectedVehicle] = useState<
+    { readonly simulationSeed: string; readonly vehicleId: string } | undefined
+  >();
+  const selectedVehicleId =
+    selectedVehicle?.simulationSeed === traffic.controller.state.simulationSeed
+      ? selectedVehicle.vehicleId
+      : undefined;
   const roadStatistics = useMemo(
     () => getRoadStatistics(world.roads),
     [world.roads],
@@ -22,7 +32,7 @@ export function App() {
     <main className="app-shell">
       <header className="app-header">
         <div>
-          <p className="eyebrow">Phase 3.5 · City Morphology</p>
+          <p className="eyebrow">Phase 4 · Traffic Foundation</p>
           <h1>Procedural City Generator</h1>
           <p className="subtitle">A deterministic world, one seed at a time.</p>
         </div>
@@ -38,8 +48,8 @@ export function App() {
       <section className="viewport-panel" aria-labelledby="viewport-title">
         <div className="viewport-toolbar">
           <div>
-            <h2 id="viewport-title">Blocks and parcels</h2>
-            <p>Drag to pan · Scroll to zoom</p>
+            <h2 id="viewport-title">City and traffic</h2>
+            <p>Drag to pan · Scroll to zoom · Click a vehicle for its route</p>
           </div>
           <label className="terrain-view-field">
             <span>View</span>
@@ -77,8 +87,31 @@ export function App() {
             </div>
           </dl>
         </div>
+        <TrafficControls
+          onReset={traffic.reset}
+          onSpeedChange={traffic.setSpeedMultiplier}
+          onTargetVehicleCountChange={traffic.setTargetVehicleCount}
+          onToggle={traffic.toggle}
+          selectedVehicleId={selectedVehicleId}
+          snapshot={traffic.snapshot}
+        />
         <div className="canvas-frame">
-          <WorldCanvas viewMode={viewMode} world={world} />
+          <WorldCanvas
+            onSelectVehicle={(vehicleId) =>
+              setSelectedVehicle(
+                vehicleId
+                  ? {
+                      simulationSeed: traffic.controller.state.simulationSeed,
+                      vehicleId,
+                    }
+                  : undefined,
+              )
+            }
+            selectedVehicleId={selectedVehicleId}
+            trafficController={traffic.controller}
+            viewMode={viewMode}
+            world={world}
+          />
         </div>
       </section>
     </main>

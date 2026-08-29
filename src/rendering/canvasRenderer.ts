@@ -7,6 +7,7 @@ import type {
   World,
 } from '../world/types';
 import type { Camera, ViewportSize } from './viewport';
+import { drawTraffic, type TrafficRenderInput } from './trafficRenderer';
 import {
   estimateCellElevationGradient,
   getHillshadeBrightness,
@@ -350,6 +351,7 @@ export function renderWorld(
   viewport: ViewportSize,
   devicePixelRatio: number,
   mode: WorldViewMode,
+  traffic?: TrafficRenderInput,
 ): void {
   context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   context.clearRect(0, 0, viewport.width, viewport.height);
@@ -378,5 +380,6 @@ export function renderWorld(
     );
   }
   drawRoads(context, world.roads, camera, viewport, mode === 'roadGraph');
+  if (traffic) drawTraffic(context, traffic, camera, viewport);
   drawWorldBoundary(context, world, camera, viewport);
 }

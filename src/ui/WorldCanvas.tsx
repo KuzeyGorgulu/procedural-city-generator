@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { renderWorld, type WorldViewMode } from '../rendering/canvasRenderer';
+import type { TrafficSimulationController } from '../simulation/traffic/trafficController';
+import { getVehiclePose } from '../simulation/traffic/vehicleQueries';
+import { pointDistance } from '../world/roadGeometry';
 import {
   fitCameraToBounds,
   panCamera,
+  screenToWorld,
   zoomCameraAtPoint,
   type Camera,
   type ViewportSize,
@@ -12,13 +16,23 @@ import type { Point, World } from '../world/types';
 interface WorldCanvasProps {
   readonly world: World;
   readonly viewMode: WorldViewMode;
+  readonly trafficController: TrafficSimulationController;
+  readonly selectedVehicleId?: string;
+  readonly onSelectVehicle: (vehicleId?: string) => void;
 }
 
 const INITIAL_VIEWPORT: ViewportSize = { width: 960, height: 640 };
 
-export function WorldCanvas({ world, viewMode }: WorldCanvasProps) {
+export function WorldCanvas({
+  world,
+  viewMode,
+  trafficController,
+  selectedVehicleId,
+  onSelectVehicle,
+}: WorldCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragPositionRef = useRef<Point | null>(null);
+  const dragDistanceRef = useRef(0);
   const [viewport, setViewport] = useState<ViewportSize>(INITIAL_VIEWPORT);
   const [camera, setCamera] = useState<Camera>(() =>
     fitCameraToBounds(world.bounds, INITIAL_VIEWPORT),
@@ -57,15 +71,23 @@ export function WorldCanvas({ world, viewMode }: WorldCanvasProps) {
     const context = canvas?.getContext('2d');
     if (!canvas || !context) return;
 
-    renderWorld(
-      context,
-      world,
-      camera,
-      viewport,
-      window.devicePixelRatio || 1,
-      viewMode,
-    );
-  }, [world, camera, viewport, viewMode]);
+    const draw = () =>
+      renderWorld(
+        context,
+        world,
+        camera,
+        viewport,
+        window.devicePixelRatio || 1,
+        viewMode,
+        {
+          network: trafficController.network,
+          state: trafficController.state,
+          selectedVehicleId,
+        },
+      );
+    draw();
+    return trafficController.subscribe(draw);
+  }, [world, camera, viewport, viewMode, trafficController, selectedVehicleId]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -91,6 +113,7 @@ export function WorldCanvas({ world, viewMode }: WorldCanvasProps) {
   function handlePointerDown(event: PointerEvent<HTMLCanvasElement>) {
     event.currentTarget.setPointerCapture(event.pointerId);
     dragPositionRef.current = { x: event.clientX, y: event.clientY };
+    dragDistanceRef.current = 0;
     setIsDragging(true);
   }
 
@@ -99,18 +122,56 @@ export function WorldCanvas({ world, viewMode }: WorldCanvasProps) {
     if (!previous) return;
 
     const next = { x: event.clientX, y: event.clientY };
+    dragDistanceRef.current += pointDistance(previous, next);
     setCamera((current) =>
       panCamera(current, { x: next.x - previous.x, y: next.y - previous.y }),
     );
     dragPositionRef.current = next;
   }
 
-  function handlePointerUp(event: PointerEvent<HTMLCanvasElement>) {
+  function releasePointer(
+    event: PointerEvent<HTMLCanvasElement>,
+    selectVehicle: boolean,
+  ) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    if (selectVehicle && dragDistanceRef.current <= 4) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const worldPoint = screenToWorld(
+        { x: event.clientX - rect.left, y: event.clientY - rect.top },
+        camera,
+        viewport,
+      );
+      const selectionRadius = 16 / camera.zoom;
+      const nearest = trafficController.state.vehicles
+        .map((vehicle) => ({
+          vehicle,
+          pose: getVehiclePose(vehicle, trafficController.network),
+        }))
+        .filter((entry) => entry.pose !== undefined)
+        .map((entry) => ({
+          id: entry.vehicle.id,
+          distance: pointDistance(worldPoint, entry.pose!.position),
+        }))
+        .filter((entry) => entry.distance <= selectionRadius)
+        .sort(
+          (first, second) =>
+            first.distance - second.distance || first.id.localeCompare(second.id),
+        )[0];
+      onSelectVehicle(nearest?.id);
+    }
     dragPositionRef.current = null;
+    dragDistanceRef.current = 0;
     setIsDragging(false);
+  }
+
+  function handlePointerUp(event: PointerEvent<HTMLCanvasElement>) {
+    releasePointer(event, true);
+  }
+
+  function handlePointerCancel(event: PointerEvent<HTMLCanvasElement>) {
+    releasePointer(event, false);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLCanvasElement>) {
@@ -151,10 +212,10 @@ export function WorldCanvas({ world, viewMode }: WorldCanvasProps) {
 
   return (
     <canvas
-      aria-label="Generated terrain and road viewport. Drag or use arrow keys to pan; scroll or use plus and minus to zoom."
+      aria-label="Generated city and traffic viewport. Drag or use arrow keys to pan; scroll or use plus and minus to zoom; click a vehicle to inspect its route."
       className={isDragging ? 'world-canvas is-dragging' : 'world-canvas'}
       onKeyDown={handleKeyDown}
-      onPointerCancel={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}

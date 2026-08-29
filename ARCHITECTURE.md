@@ -1,8 +1,8 @@
-# Phase 3.5 Architecture
+# Phase 4 Architecture
 
 ## Goal and deterministic contract
 
-Procedural City Generator has a deterministic foundation, queryable terrain, a terrain-responsive planar road graph, and explicit road-bounded blocks and parcels. Phase 3.5 refines the city skeleton with broader regional coverage, less rigid canonical road geometry, and readable terrain relief without adding zoning or buildings.
+Procedural City Generator has a deterministic foundation, queryable terrain, a terrain-responsive planar road graph, and explicit road-bounded blocks and parcels. Phase 4 adds a deterministic traffic simulation over that static generated world without changing Phase 3.5 geometry or adding zoning or buildings.
 
 The project contract remains:
 
@@ -12,7 +12,7 @@ The project contract remains:
 
 For identical inputs, `generateWorld` returns deeply identical, JSON-serializable data. Generation has no clock, browser, React, rendering, viewport, or ambient random-state dependency.
 
-`GENERATOR_VERSION` is `phase-3.5`. It was deliberately bumped because arterial selection, road geometry, and therefore blocks and parcels changed. Only the current generator remains executable; historical generators and save migrations are deferred until persistence requirements are known.
+`GENERATOR_VERSION` remains `phase-3.5`: Phase 4 does not change generated world geometry. Traffic has an independent `phase-4.0` simulation version and derived seed domain. Only the current generator remains executable; historical generators and save migrations are deferred until persistence requirements are known.
 
 ## Modules and boundaries
 
@@ -44,7 +44,16 @@ src/
   rendering/
     terrainRelief.ts            pure fixed-light hillshade helpers
     canvasRenderer.ts           Canvas world visualization
+    trafficRenderer.ts          stateless vehicle and selected-route drawing
     viewport.ts                 camera transforms
+  simulation/traffic/
+    trafficNetwork.ts           read-only road-to-routing adapter
+    routing.ts                  deterministic travel-time A*
+    spawning.ts                 bounded seeded trip demand
+    trafficSimulation.ts        pure fixed-tick movement and interaction
+    trafficController.ts        clock, accumulator, controls, subscriptions
+    trafficMetrics.ts           reusable aggregate traffic metrics
+    vehicleQueries.ts           route-derived vehicle poses and progress
   app/, ui/, utils/             application and browser boundaries
 ```
 
@@ -205,12 +214,60 @@ Elevation colors receive fixed-light hillshade derived from each cell's elevatio
 
 Rendering never changes world data and is not consulted during generation.
 
-## Future Phase 4 compatibility
+## Static world and dynamic simulation boundary
 
-Phase 4 can query block membership, parcel geometry/area/centroid, and exact road-facing parcel edges without reconstructing Canvas geometry. Zoning, parks, civic land, and building suitability remain future policy layered onto these spatial facts.
+`World` remains the plain, JSON-serializable output of generation: terrain, roads, blocks, and parcels. `TrafficSimulationState` is separate dynamic data containing the simulation seed/version, tick and elapsed time, vehicles, population target, deterministic spawn serial, and completed-trip totals. It never becomes part of `World`, and simulation functions only read the canonical road graph through a derived adapter.
 
-Future traffic can continue deriving routing adjacency from the road graph and associate buildings or agents with parcel and road IDs when those systems exist.
+The simulation controller is independent of React and Canvas. React owns user controls and publishes throttled aggregate metrics; it does not store per-frame vehicle arrays. Canvas subscribes to controller notifications and consumes the current state for drawing. Neither rendering nor viewport state participates in traffic updates.
+
+## Traffic routing graph
+
+`buildTrafficNetwork` adapts each valid canonical `RoadEdge` into stable forward and reverse `TrafficArc` records. Arcs reference the original edge ID and carry connectivity, road class, length, nominal speed, and travel-time cost. The source `RoadGraph` remains authoritative and is neither copied as new geometry nor mutated. The directional arc representation allows a future policy to omit illegal directions without changing generated roads.
+
+Current road edges are straight canonical segments, so a vehicle pose is interpolated between the referenced endpoint nodes. If generated roads later store polyline geometry, the pose query is the single movement-facing boundary that must adopt cumulative polyline interpolation.
+
+Trip endpoints prefer nodes on road edges bounding valid Phase 3 blocks. If fewer than two such nodes exist, the adapter safely falls back to all connected road nodes. This associates synthetic Phase 4 demand with developed city areas without inventing buildings, driveways, or citizen assignments.
+
+## Deterministic routing and traffic RNG
+
+Traffic routing uses A* with the initial explainable cost:
+
+```text
+arc cost = road edge length / nominal road-class speed
+```
+
+The Euclidean travel-time heuristic is admissible under the configured maximum speed. Outgoing arcs and heap ties have explicit stable ordering. Invalid node IDs and disconnected destinations return no route; an identical origin and destination returns a valid empty route. Spawning rejects unusable or too-short routes with fixed attempt and serial budgets rather than retrying indefinitely.
+
+The simulation seed is derived from `(generator version, normalized world seed, traffic simulation version)`. Each vehicle serial and trip attempt receives a named RNG fork. Traffic consumes no ambient randomness and cannot shift terrain, road, block, or parcel RNG streams. For equal world seed, traffic version, target population, inputs, and tick count, complete traffic state is reproducible.
+
+## Fixed-timestep clock and controls
+
+`TrafficSimulationController` accumulates scaled real time and advances pure `stepTrafficSimulation` updates in fixed 0.05-second ticks. Render frames may arrive at different rates without changing tick results. A frame-delta clamp and bounded catch-up prevent an inactive browser tab from causing an unbounded update burst.
+
+The controller exposes play, pause, toggle, reset, 0.5x/1x/2x/4x speed, and bounded target-population changes. Reset pauses, clears accumulated real time, and recreates the exact initial state for the current world seed and population target.
+
+## Vehicle movement and traffic interaction
+
+A `Vehicle` has a stable serial ID, origin and destination nodes, immutable planned route, current route-arc index and progress, current and desired speed, movement state, elapsed trip time, and distance travelled. Position and orientation are queries derived from the current arc rather than independent free-space physics.
+
+Each tick groups vehicles by directed arc and sorts them once by progress. Followers use a minimum distance and time-gap target speed, then accelerate or brake toward that target. This avoids an all-pairs scan and prevents same-direction vehicles from collapsing onto one point.
+
+Vehicles approaching a graph node of degree three or greater request deterministic intersection admission. At most one request per intersection wins each tick, ordered by stable vehicle ID, and only when the outgoing arc has entrance clearance. Other requesters stop short in a queued state. This is intentionally a minimal right-of-way foundation, not lanes or signal control.
+
+Vehicles advance through any number of route arcs allowed by their tick distance and complete at their destination. Completed vehicles contribute trip-time totals and are replaced through the same deterministic bounded demand process. Missing or malformed route references fail safely instead of crashing the simulation.
+
+## Traffic metrics and rendering
+
+`getTrafficMetrics` exposes active vehicle count, completed trips, average current speed, average active-trip progress, average completed travel time, and per-directed-arc occupancy with source road-edge IDs. These are simulation queries available to future systems; the UI only formats their output.
+
+The traffic renderer draws simple oriented vehicle markers after roads and urban overlays, transformed by the same world camera. Queued vehicles receive a distinct color. Selecting a vehicle draws its graph route. Pan, zoom, view mode, and render frequency cannot mutate the generated world or traffic state.
+
+## Future simulation compatibility
+
+Future phases can query block membership, parcel geometry/area/centroid, exact road-facing parcel edges, routing arcs, vehicle state, and segment occupancy without reconstructing Canvas geometry. Zoning, parks, civic land, and building suitability remain future policy layered onto these spatial facts.
+
+Citizens, buildings, jobs, schedules, transit, and economy can provide real trip demand later while retaining the routing, clock, and vehicle-state boundaries. Congestion, travel-time, noise, stress, and other feedback systems can consume the exposed occupancy and trip metrics instead of scraping UI state.
 
 ## Intentionally deferred
 
-Phase 3.5 does not implement coastline- or world-boundary-generated blocks, terrain clipping, curved parcel boundaries, cadastral realism, ownership, alleys, driveways, sidewalks, parking, zoning, buildings, parks as gameplay, population, economy, traffic, or dynamic subdivision. Bridges and grade separation also remain absent. These are intentional scope boundaries, not data inferred in rendering.
+Phase 4 does not implement coastline- or world-boundary-generated blocks, terrain clipping, curved parcel boundaries, cadastral realism, ownership, alleys, driveways, sidewalks, parking, zoning, buildings, parks as gameplay, population, citizens, homes/jobs, commuting schedules, economy, pedestrians, public transport, multi-lane behavior, lane changing, overtaking, optimized traffic signals, accidents, emergency vehicles, dynamic congestion-aware rerouting, noise, pollution, emotions, or dynamic subdivision. Bridges and grade separation also remain absent. These are intentional scope boundaries, not data inferred in rendering.

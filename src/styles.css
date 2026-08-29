@@ -253,6 +253,85 @@ h1 {
   white-space: nowrap;
 }
 
+.traffic-toolbar {
+  display: flex;
+  min-height: 72px;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 18px;
+  background: rgb(9 16 28 / 74%);
+  border-bottom: 1px solid #243148;
+}
+
+.traffic-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.traffic-actions button {
+  height: 36px;
+  padding: 0 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.traffic-field {
+  display: grid;
+  gap: 4px;
+}
+
+.traffic-field span,
+.traffic-stats dt {
+  color: #68778c;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.traffic-field select {
+  height: 36px;
+  padding: 0 28px 0 9px;
+  color: #dbe4f1;
+  background: #182438;
+  border: 1px solid #34445c;
+  border-radius: 6px;
+  outline: none;
+}
+
+.traffic-field select:focus-visible {
+  border-color: #58d1c9;
+  box-shadow: 0 0 0 3px rgb(88 209 201 / 14%);
+}
+
+.traffic-stats {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px clamp(14px, 2.4vw, 28px);
+  margin: 0;
+}
+
+.traffic-stats div {
+  display: grid;
+  min-width: 54px;
+  gap: 3px;
+}
+
+.traffic-stats dd {
+  max-width: 150px;
+  overflow: hidden;
+  margin: 0;
+  color: #c8d2df;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .canvas-frame {
   height: min(68vh, 760px);
   min-height: 440px;
@@ -283,6 +362,16 @@ h1 {
 
   .controls {
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .traffic-toolbar {
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .traffic-stats {
+    flex-basis: 100%;
+    justify-content: flex-start;
   }
 }
 
@@ -323,6 +412,23 @@ h1 {
   }
 
   .world-stats div:last-child {
+    display: none;
+  }
+
+  .traffic-toolbar {
+    gap: 10px;
+    padding-inline: 14px;
+  }
+
+  .traffic-actions {
+    width: 100%;
+  }
+
+  .traffic-actions button {
+    flex: 1;
+  }
+
+  .traffic-stats div:last-child {
     display: none;
   }
 
