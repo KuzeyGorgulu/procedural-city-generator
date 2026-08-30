@@ -3,16 +3,18 @@ import { GENERATOR_VERSION } from '../core/generatorVersion';
 import { generateWorld } from './generateWorld';
 
 describe('generateWorld', () => {
-  it('uses the Phase 3.5 generator contract', () => {
-    const world = generateWorld({ seed: 'phase-3.5-contract' });
-    expect(GENERATOR_VERSION).toBe('phase-3.5');
-    expect(world.metadata.generatorVersion).toBe('phase-3.5');
+  it('uses the Phase 5.0 static-world generator contract', () => {
+    const world = generateWorld({ seed: 'phase-5.0-contract' });
+    expect(GENERATOR_VERSION).toBe('phase-5.0');
+    expect(world.metadata.generatorVersion).toBe('phase-5.0');
     expect(world.roads).toEqual(
-      generateWorld({ seed: 'phase-3.5-contract' }).roads,
+      generateWorld({ seed: 'phase-5.0-contract' }).roads,
     );
     expect(world.urban).toEqual(
-      generateWorld({ seed: 'phase-3.5-contract' }).urban,
+      generateWorld({ seed: 'phase-5.0-contract' }).urban,
     );
+    expect(world.urban.zoning).toHaveLength(world.urban.parcels.length);
+    expect(world.urban.buildings.length).toBeGreaterThan(0);
   });
 
   it('returns deeply identical worlds for the same seed and version', () => {

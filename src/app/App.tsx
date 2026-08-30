@@ -11,7 +11,7 @@ import { getUrbanStatistics } from '../world/urbanQueries';
 export function App() {
   const { seedInput, setSeedInput, world, generate, randomize } = useWorldGeneration();
   const traffic = useTrafficSimulation(world);
-  const [viewMode, setViewMode] = useState<WorldViewMode>('parcels');
+  const [viewMode, setViewMode] = useState<WorldViewMode>('buildings');
   const [selectedVehicle, setSelectedVehicle] = useState<
     { readonly simulationSeed: string; readonly vehicleId: string } | undefined
   >();
@@ -32,7 +32,7 @@ export function App() {
     <main className="app-shell">
       <header className="app-header">
         <div>
-          <p className="eyebrow">Phase 4 · Traffic Foundation</p>
+          <p className="eyebrow">Phase 5 · Zoning &amp; Buildings</p>
           <h1>Procedural City Generator</h1>
           <p className="subtitle">A deterministic world, one seed at a time.</p>
         </div>
@@ -48,7 +48,7 @@ export function App() {
       <section className="viewport-panel" aria-labelledby="viewport-title">
         <div className="viewport-toolbar">
           <div>
-            <h2 id="viewport-title">City and traffic</h2>
+            <h2 id="viewport-title">Developed city and traffic</h2>
             <p>Drag to pan · Scroll to zoom · Click a vehicle for its route</p>
           </div>
           <label className="terrain-view-field">
@@ -60,6 +60,9 @@ export function App() {
               }
               value={viewMode}
             >
+              <option value="buildings">Buildings</option>
+              <option value="zoning">Zoning</option>
+              <option value="suitability">Development suitability</option>
               <option value="parcels">Parcels</option>
               <option value="blocks">Blocks</option>
               <option value="elevation">Elevation</option>
@@ -76,6 +79,10 @@ export function App() {
             <div>
               <dt>Parcels</dt>
               <dd>{urbanStatistics.parcelCount}</dd>
+            </div>
+            <div>
+              <dt>Buildings</dt>
+              <dd>{urbanStatistics.buildingCount}</dd>
             </div>
             <div>
               <dt>Road edges</dt>

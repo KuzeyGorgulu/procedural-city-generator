@@ -1,8 +1,8 @@
-# Phase 4 Architecture
+# Phase 5 Architecture
 
 ## Goal and deterministic contract
 
-Procedural City Generator has a deterministic foundation, queryable terrain, a terrain-responsive planar road graph, and explicit road-bounded blocks and parcels. Phase 4 adds a deterministic traffic simulation over that static generated world without changing Phase 3.5 geometry or adding zoning or buildings.
+Procedural City Generator has a deterministic foundation, queryable terrain, a terrain-responsive planar road graph, explicit road-bounded blocks and parcels, spatial zoning, frontage-aligned buildings, and a deterministic traffic simulation. Phase 5 extends the static world from parcels into development data while preserving the separation from Phase 4's dynamic traffic state.
 
 The project contract remains:
 
@@ -12,7 +12,7 @@ The project contract remains:
 
 For identical inputs, `generateWorld` returns deeply identical, JSON-serializable data. Generation has no clock, browser, React, rendering, viewport, or ambient random-state dependency.
 
-`GENERATOR_VERSION` remains `phase-3.5`: Phase 4 does not change generated world geometry. Traffic has an independent `phase-4.0` simulation version and derived seed domain. Only the current generator remains executable; historical generators and save migrations are deferred until persistence requirements are known.
+`GENERATOR_VERSION` is `phase-5.0`: zoning and buildings are part of the generated world, so changing those contracts intentionally advances the world version. Under the existing root-seed convention, a version change creates a new deterministic world for the same textual seed. Traffic retains its independent `phase-4.0` simulation version and derived seed domain. Only the current generator remains executable; historical generators and save migrations are deferred until persistence requirements are known.
 
 ## Modules and boundaries
 
@@ -32,9 +32,19 @@ src/
       extractBlocks.ts          deterministic half-edge face traversal
       generateParcels.ts        safe recursive polygon subdivision
       generateUrbanStructure.ts subsystem composition and block-local RNG
+    development/
+      frontage.ts               parcel frontage-to-road resolution
+      developmentTestFixtures.ts shared deterministic development fixtures
+    zoning/
+      config.ts                 explicit suitability and zoning thresholds
+      generateZoning.ts         parcel suitability, block tendency, land use
+    buildings/
+      config.ts                 setbacks, coverage, floors, and area ratios
+      footprintGeometry.ts      strict footprint sampling and containment
+      generateBuildings.ts      frontage-aligned building generation
     generateWorld.ts            deterministic subsystem composition
   world/
-    types.ts                    serializable World, TerrainData, RoadGraph
+    types.ts                    serializable generated-world contracts
     terrainQueries.ts           public world-space terrain access
     roadGeometry.ts             segment and projection primitives
     roadQueries.ts              graph lookups, nearest road, statistics
@@ -97,9 +107,20 @@ urban/v1
   parcels-v1/block-####
     target-area
     subdivision-v1
+zoning/v1
+  block/<block-id>
+    tendency
+  parcel/<parcel-id>
+    core-exception
+    mixed-retention
+    transition-exception
+buildings/v1
+  parcel/<parcel-id>
+    footprint/coverage
+    floor-jitter
 ```
 
-Terrain remains under `terrain/v1`. Block extraction is deterministic and consumes no randomness. Each block's parcels use a block-local stream; because forks derive from immutable stream keys, generating another block or consuming an unrelated domain cannot shift existing parcel geometry.
+Terrain remains under `terrain/v1`. Block extraction is deterministic and consumes no randomness. Each block's parcels use a block-local stream; because forks derive from immutable stream keys, generating another block or consuming an unrelated domain cannot shift existing parcel geometry. Zoning and buildings receive independent root domains and stable block/parcel forks. Their RNG consumption cannot perturb terrain, roads, parcels, each other, or traffic.
 
 ## Regional anchors and arterial strategy
 
@@ -154,10 +175,10 @@ The public query layer provides node lookup, incident edges, degree, neighboring
 
 ## Urban world schema
 
-`World.urban` contains plain serializable arrays:
+`World.urban` contains plain serializable arrays. Coordinates and lengths use world-space meters; polygon, footprint, gross-floor, and usable-floor areas use square meters.
 
 ```text
-UrbanStructure { blocks, parcels }
+UrbanStructure { blocks, parcels, zoning, buildings }
 CityBlock {
   id, polygon, area, perimeter,
   boundaryRoadEdgeIds, parcelIds
@@ -166,11 +187,20 @@ Parcel {
   id, blockId, polygon, area, perimeter,
   frontageEdgeIndices
 }
+ParcelZoning {
+  parcelId, blockId, zone, intensity, suitability
+}
+Building {
+  id, parcelId, blockId, zone, use, footprint,
+  footprintArea, floorCount, height,
+  grossFloorArea, usableFloorArea,
+  primaryFrontageEdgeIndex, frontageRoadEdgeId
+}
 ```
 
 Polygon rings use world-space coordinates, positive signed-area winding, and no repeated closing vertex. Equivalent rings are rotated to the lowest `(y, x)` vertex after duplicate and collinear-point cleanup. Blocks are sorted by centroid Y, centroid X, area, and canonical polygon key before receiving `block-####` IDs. Parcels receive block-scoped, centroid-sorted IDs such as `parcel-block-0003-002`.
 
-`boundaryRoadEdgeIds` records the canonical road edges traversed around each block. `frontageEdgeIndices` records parcel boundary segments that overlap the original road-bounded block perimeter by at least four world units. This is enough for Phase 4 to derive road-facing sides without introducing driveways or entrances.
+`boundaryRoadEdgeIds` records the canonical road edges traversed around each block. `frontageEdgeIndices` records parcel boundary segments that overlap the original road-bounded block perimeter by at least four world units. Phase 5 resolves those sides back to canonical road-edge IDs without changing the parcel contract or introducing driveways and entrances.
 
 ## Deterministic face extraction
 
@@ -200,15 +230,33 @@ A split is accepted only when both children:
 
 Subdivision targets a deterministic block-local area from `9,000` through `15,000` square units, permits final parcels up to `50,000`, and stops after eight levels. Unsafe cuts are skipped. The binary clipping construction gives exact coverage and non-overlapping interiors; final validation rejects a block if any resulting parcel violates size, shape, centroid containment, frontage, or land-centroid rules. Terrain is checked through `sampleTerrain`.
 
+## Development suitability and zoning
+
+Every valid parcel receives one `ParcelZoning` record. Its `DevelopmentSuitability` exposes a normalized score, developable flag, mean slope and elevation, water proximity, accessibility, centrality, and explicit constraints. Constraints identify invalid geometry, excessive water or slope, undersized or narrow parcels, and missing usable road frontage instead of silently pretending all parcels can support buildings.
+
+Suitability samples canonical terrain queries at parcel centroids, vertices, and edge midpoints. It measures water around the centroid, frontage overlap with canonical roads, arterial access and nearby graph intersections, distance from the generated urban center, parcel area, and bounding-box shape. These inputs are deterministic and independent of the viewport.
+
+Zoning is parcel-level but starts from a stable block profile, so adjacent parcels normally form coherent districts rather than independent color noise. The supported zones are residential, commercial, industrial, mixed-use, civic, and green/open space. Central accessible blocks favor commercial or mixed use, peripheral arterial-accessible large parcels can become industrial, and steep, water-exposed, constrained, or selected open-space blocks become green. A civic block designates its largest parcel as civic while neighboring parcels transition to mixed or residential uses. A deterministic lowest-suitability block fallback guarantees a coherent open-space district when no environmental or seeded profile selected one.
+
+Development intensity is low, medium, or high and is derived from zone, centrality, accessibility, and suitability. It is coarse metadata for building massing and future capacity, not a legal planning code.
+
+## Frontage-aligned building generation
+
+Green and undevelopable parcels produce no building. Each remaining parcel gets at most one deterministic rectangular footprint. The frontage adapter resolves and orders viable parcel sides against the block's canonical boundary road edges. For each frontage, the generator establishes tangent and inward vectors, ray-casts toward the opposite parcel boundary, applies zone-specific front/side/rear setbacks, and tries a bounded 4-by-4 sequence of width/depth scales. Failed candidates are skipped; generation never loops indefinitely.
+
+Footprints must be finite, simple, positive-area polygons of at least 180 square meters. Boundary and interior samples at four-meter spacing must remain inside the parcel. Terrain samples at ten-meter spacing must all be land and average no more than `0.5` normalized slope. These checks deliberately favor missing a difficult building over emitting invalid, underwater, or out-of-parcel geometry.
+
+Coverage ranges, setbacks, floor ranges, and usable-area ratios differ by use. Floor count also responds deterministically to development intensity, centrality, access, and suitability. Height is `floorCount * 3.2` meters; gross floor area is footprint area times floors; usable floor area applies a use-specific circulation/service allowance. Stable building IDs derive from parcel IDs, and every record retains its primary parcel frontage index and canonical road-edge ID for future entrances and trip demand.
+
 ## Urban queries and statistics
 
-The public query layer provides ID lookup, parcels by block, point containment, polygon centroids, and derived counts/areas. No spatial index is introduced at the current scale. Statistics are derived rather than duplicated in canonical world data.
+The public query layer provides ID lookup, parcels and buildings by block, zoning and buildings by parcel, point containment, polygon centroids, and derived counts/areas. Urban statistics include block, parcel, and building counts, total gross floor area, and counts by zone. No spatial index is introduced at the current scale. Statistics are derived rather than duplicated in canonical world data.
 
 `getMorphologyStatistics` adds lightweight tuning diagnostics without changing the world schema. It samples viable land through `sampleTerrain`, measures the fraction within 220 units of a road, compares road and block-centroid extents with viable-land extent, and reports long arterial edges. The configured 200-unit sample grid is deliberately coarse: these values support broad multi-seed regression checks, not gameplay or GIS analysis.
 
 ## Rendering and debug views
 
-Canvas renders terrain, then neutral block fills, parcel boundaries/frontage, and finally roads. Blocks and Parcels modes expose urban geometry without implying zoning. Elevation, slope, water/land, and road-graph views remain available. Road graph mode mutes terrain and highlights graph intersections.
+Canvas renders terrain, the selected development layer, and finally roads and traffic. Buildings mode presents zone-colored building footprints over subdued parcels. Zoning mode fills each parcel by assigned zone. Development-suitability mode uses an undevelopable color plus a low-to-high suitability ramp. Blocks and Parcels modes continue exposing the underlying Phase 3 geometry. Elevation, slope, water/land, and road-graph views remain available. Road graph mode mutes terrain and highlights graph intersections.
 
 Elevation colors receive fixed-light hillshade derived from each cell's elevation gradient. The pure helper approximates a surface normal with explicit vertical exaggeration, ambient light, and a northwestern light vector. This derived brightness is deterministic and rendering-only: it does not modify elevation, slope, terrain queries, routing, or canonical world data. The stronger elevation view remains subtle beneath roads and urban overlays.
 
@@ -216,7 +264,7 @@ Rendering never changes world data and is not consulted during generation.
 
 ## Static world and dynamic simulation boundary
 
-`World` remains the plain, JSON-serializable output of generation: terrain, roads, blocks, and parcels. `TrafficSimulationState` is separate dynamic data containing the simulation seed/version, tick and elapsed time, vehicles, population target, deterministic spawn serial, and completed-trip totals. It never becomes part of `World`, and simulation functions only read the canonical road graph through a derived adapter.
+`World` remains the plain, JSON-serializable output of generation: terrain, roads, blocks, parcels, zoning, and buildings. Zoning and buildings are static generated data and never change when traffic runs. `TrafficSimulationState` is separate dynamic data containing the simulation seed/version, tick and elapsed time, vehicles, population target, deterministic spawn serial, and completed-trip totals. It never becomes part of `World`, and simulation functions only read the canonical road graph and development context through derived adapters.
 
 The simulation controller is independent of React and Canvas. React owns user controls and publishes throttled aggregate metrics; it does not store per-frame vehicle arrays. Canvas subscribes to controller notifications and consumes the current state for drawing. Neither rendering nor viewport state participates in traffic updates.
 
@@ -264,10 +312,10 @@ The traffic renderer draws simple oriented vehicle markers after roads and urban
 
 ## Future simulation compatibility
 
-Future phases can query block membership, parcel geometry/area/centroid, exact road-facing parcel edges, routing arcs, vehicle state, and segment occupancy without reconstructing Canvas geometry. Zoning, parks, civic land, and building suitability remain future policy layered onto these spatial facts.
+Future phases can query block membership, parcel geometry/area/centroid, suitability constraints, zone and intensity, exact road-facing parcel edges, building use/height/floor area, routing arcs, vehicle state, and segment occupancy without reconstructing Canvas geometry.
 
-Citizens, buildings, jobs, schedules, transit, and economy can provide real trip demand later while retaining the routing, clock, and vehicle-state boundaries. Congestion, travel-time, noise, stress, and other feedback systems can consume the exposed occupancy and trip metrics instead of scraping UI state.
+Population, jobs, schedules, transit, and economy can turn building floor area and use into residents, workers, services, and real trip demand while retaining the routing, clock, and vehicle-state boundaries. Congestion, travel-time, noise, stress, and other feedback systems can consume the exposed occupancy and trip metrics instead of scraping UI state.
 
 ## Intentionally deferred
 
-Phase 4 does not implement coastline- or world-boundary-generated blocks, terrain clipping, curved parcel boundaries, cadastral realism, ownership, alleys, driveways, sidewalks, parking, zoning, buildings, parks as gameplay, population, citizens, homes/jobs, commuting schedules, economy, pedestrians, public transport, multi-lane behavior, lane changing, overtaking, optimized traffic signals, accidents, emergency vehicles, dynamic congestion-aware rerouting, noise, pollution, emotions, or dynamic subdivision. Bridges and grade separation also remain absent. These are intentional scope boundaries, not data inferred in rendering.
+Phase 5 does not implement coastline- or world-boundary-generated blocks, terrain clipping, curved parcel boundaries, cadastral realism, ownership, multiple buildings per parcel, detailed architecture, entrances, alleys, driveways, sidewalks, parking, functional park simulation, population, citizens, home/work assignment, occupancy, commuting schedules, economy, pedestrians, public transport, multi-lane behavior, lane changing, overtaking, optimized traffic signals, accidents, emergency vehicles, dynamic congestion-aware rerouting, noise, pollution, emotions, or dynamic subdivision. Bridges and grade separation also remain absent. Opposing Phase 4 vehicles still share the visual road centerline. These are intentional scope boundaries, not data inferred in rendering.

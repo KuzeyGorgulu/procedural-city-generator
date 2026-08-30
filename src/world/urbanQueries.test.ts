@@ -5,8 +5,11 @@ import {
   findParcelAtPoint,
   getBlock,
   getBlockCentroid,
+  getBuilding,
+  getBuildingsForParcel,
   getParcel,
   getParcelCentroid,
+  getParcelZoning,
   getParcelsForBlock,
   getUrbanStatistics,
 } from './urbanQueries';
@@ -22,6 +25,7 @@ describe('urban queries', () => {
 
     expect(getBlock(urban, block.id)).toBe(block);
     expect(getParcel(urban, parcel.id)).toBe(parcel);
+    expect(getParcelZoning(urban, parcel.id)?.parcelId).toBe(parcel.id);
     expect(findBlockAtPoint(urban, getBlockCentroid(block))?.id).toBe(block.id);
     expect(findParcelAtPoint(urban, getParcelCentroid(parcel))?.id).toBe(parcel.id);
     expect(findBlockAtPoint(urban, parcel.polygon[0])?.id).toBe(block.id);
@@ -29,6 +33,20 @@ describe('urban queries', () => {
     const statistics = getUrbanStatistics(urban);
     expect(statistics.blockCount).toBe(urban.blocks.length);
     expect(statistics.parcelCount).toBe(urban.parcels.length);
+    expect(statistics.buildingCount).toBe(urban.buildings.length);
+    expect(
+      Object.values(statistics.zoneCounts).reduce(
+        (total, count) => total + count,
+        0,
+      ),
+    ).toBe(urban.parcels.length);
     expect(statistics.totalParcelArea).toBeCloseTo(statistics.totalBlockArea);
+    expect(statistics.totalGrossFloorArea).toBeGreaterThan(0);
+
+    const building = urban.buildings[0];
+    expect(building).toBeDefined();
+    if (!building) return;
+    expect(getBuilding(urban, building.id)).toBe(building);
+    expect(getBuildingsForParcel(urban, building.parcelId)).toContain(building);
   });
 });

@@ -25,6 +25,8 @@ describe('generateUrbanStructure', () => {
       const world = generateWorld({ seed });
       expect(world.urban.blocks.length).toBeGreaterThan(5);
       expect(world.urban.parcels.length).toBeGreaterThan(world.urban.blocks.length);
+      expect(world.urban.zoning).toHaveLength(world.urban.parcels.length);
+      expect(world.urban.buildings.length).toBeGreaterThan(0);
       const roadEdgeIds = new Set(world.roads.edges.map((edge) => edge.id));
       const roadEdgesById = new Map(world.roads.edges.map((edge) => [edge.id, edge]));
       const roadNodesById = new Map(world.roads.nodes.map((node) => [node.id, node]));

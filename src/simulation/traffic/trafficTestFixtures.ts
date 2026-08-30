@@ -81,6 +81,8 @@ export function createCrossRoadWorld(): World {
         },
       ],
       parcels: [],
+      zoning: [],
+      buildings: [],
     },
   };
 }

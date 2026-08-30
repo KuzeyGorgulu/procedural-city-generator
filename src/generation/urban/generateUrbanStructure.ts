@@ -52,5 +52,5 @@ export function generateUrbanStructure({
     ...block,
     parcelIds: parcelIdsByBlock.get(block.id) ?? [],
   }));
-  return { blocks, parcels };
+  return { blocks, parcels, zoning: [], buildings: [] };
 }

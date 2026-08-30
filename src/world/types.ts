@@ -51,6 +51,25 @@ export interface RoadGraph {
 
 export type BlockId = string;
 export type ParcelId = string;
+export type BuildingId = string;
+
+export type ZoneType =
+  | 'residential'
+  | 'commercial'
+  | 'industrial'
+  | 'mixed-use'
+  | 'civic'
+  | 'green';
+
+export type DevelopmentIntensity = 'low' | 'medium' | 'high';
+
+export type DevelopmentConstraint =
+  | 'invalid-geometry'
+  | 'underwater'
+  | 'steep'
+  | 'too-small'
+  | 'too-narrow'
+  | 'no-road-frontage';
 
 export interface CityBlock {
   readonly id: BlockId;
@@ -73,9 +92,53 @@ export interface Parcel {
   readonly frontageEdgeIndices: readonly number[];
 }
 
+export interface DevelopmentSuitability {
+  /** Normalized composite score in [0, 1]. */
+  readonly score: number;
+  readonly developable: boolean;
+  readonly meanSlope: number;
+  readonly meanElevation: number;
+  readonly waterProximity: number;
+  readonly accessibility: number;
+  readonly centrality: number;
+  readonly constraints: readonly DevelopmentConstraint[];
+}
+
+export interface ParcelZoning {
+  readonly parcelId: ParcelId;
+  readonly blockId: BlockId;
+  readonly zone: ZoneType;
+  readonly intensity: DevelopmentIntensity;
+  readonly suitability: DevelopmentSuitability;
+}
+
+export type BuildingUse = Exclude<ZoneType, 'green'>;
+
+export interface Building {
+  readonly id: BuildingId;
+  readonly parcelId: ParcelId;
+  readonly blockId: BlockId;
+  readonly zone: BuildingUse;
+  readonly use: BuildingUse;
+  /** Canonical positive-area ring in world-space meters. */
+  readonly footprint: readonly Point[];
+  readonly footprintArea: number;
+  readonly floorCount: number;
+  /** Meters, derived from floorCount and the configured floor height. */
+  readonly height: number;
+  /** Square meters across all floors. */
+  readonly grossFloorArea: number;
+  /** Coarse future capacity input after circulation/service allowance. */
+  readonly usableFloorArea: number;
+  readonly primaryFrontageEdgeIndex: number;
+  readonly frontageRoadEdgeId: RoadEdgeId;
+}
+
 export interface UrbanStructure {
   readonly blocks: readonly CityBlock[];
   readonly parcels: readonly Parcel[];
+  readonly zoning: readonly ParcelZoning[];
+  readonly buildings: readonly Building[];
 }
 
 export interface WorldMetadata {

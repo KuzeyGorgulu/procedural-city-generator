@@ -1,9 +1,10 @@
 # Procedural City Generator
 
-A deterministic procedural city simulation project. The codebase includes terrain, terrain-shaped graph-first roads, road-bounded blocks and parcels, and a fixed-timestep traffic foundation while preserving this world-generation contract:
+A deterministic procedural city simulation project. The current milestone generates terrain, a terrain-shaped road graph, road-bounded blocks and parcels, spatially coherent zoning, frontage-aligned buildings, and a separate fixed-timestep traffic simulation.
 
 ```text
-same seed + same generatorVersion = same world
+same normalized seed + same generatorVersion = same generated world
+same world + same traffic inputs + same tick count = same traffic state
 ```
 
 ## Run locally
@@ -15,9 +16,9 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. Enter a seed and choose **Generate**, or choose **Random seed**. The seed is stored in the URL, so reloads reproduce the same terrain, roads, blocks, parcels, and initial traffic state. Drag to pan, use the mouse wheel to zoom, and use the view selector to inspect Parcels, Blocks, terrain, or the road graph.
+Open the local URL printed by Vite. Enter a seed and choose **Generate**, or choose **Random seed**. The seed is stored in the URL, so reloads reproduce the same terrain, roads, urban structure, zoning, buildings, and initial traffic state. Drag to pan and use the mouse wheel to zoom.
 
-Traffic starts paused. Use **Play traffic**, **Pause traffic**, **Reset**, the speed selector, and the target vehicle selector to control the fixed-timestep simulation. Click a vehicle to highlight its planned route. Reset reproduces the initial traffic population for the current world seed and selected target count.
+The view selector exposes Buildings, Zoning, Development suitability, Parcels, Blocks, Elevation, Slope, Water/Land, and Road graph. Traffic starts paused. Use **Play traffic**, **Pause traffic**, **Reset**, the speed selector, and the target-vehicle selector to control it. Click a vehicle to highlight its planned route.
 
 ## Checks
 
@@ -29,15 +30,18 @@ npm run build
 
 ## Current status
 
-- Phase 0 — Foundation: complete
-- Phase 1 — Terrain: complete
-- Phase 2 — Roads: complete
-- Phase 3 — Urban Structure: complete
-- Phase 3.5 — City Morphology Refinement: complete
-- Phase 4 — Traffic Simulation Foundation: complete
+- Phase 0 - Foundation: complete
+- Phase 1 - Terrain: complete
+- Phase 2 - Roads: complete
+- Phase 3 - Urban Structure: complete
+- Phase 3.5 - City Morphology Refinement: complete
+- Phase 4 - Traffic Simulation Foundation: complete
+- Phase 5 - Zoning & Buildings: complete
 
-Phase 4 derives a traffic-routing adapter from the existing roads, finds deterministic travel-time routes, spawns a modest seeded vehicle population near developed blocks, and advances it with a fixed simulation tick. Vehicles follow canonical road geometry, use basic headway and deterministic intersection admission, and expose reusable occupancy and trip metrics. World generation remains at `GENERATOR_VERSION` `phase-3.5`; traffic uses its own `phase-4.0` simulation seed domain so it cannot perturb generated terrain or city geometry.
+Phase 5 extends the static generation pipeline from parcels into explicit parcel zoning and building records. Zoning considers developability, terrain, water proximity, road access, centrality, parcel size/shape, and block-level land-use tendencies. Buildings use bounded frontage-aligned footprint attempts, zone-specific setbacks and coverage, strict parcel/terrain checks, and deterministic floor and floor-area metadata. World units are treated as meters; polygon and floor areas are square meters.
 
-Zoning, buildings, coastline/world-edge blocks, cadastral realism, bridges, citizens, commuting demand, congestion-aware rerouting, public transport, traffic signals, parking, economy, and emotional/environmental feedback are intentionally not implemented.
+The generated-world version is now `phase-5.0`. Phase 4 traffic remains dynamic state outside `World`, retains its independent simulation seed domain, and only reads generated roads and urban data. Viewport or simulation interaction cannot alter generated geometry.
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for generation architecture plus traffic routing, deterministic simulation, movement, interaction, metrics, and rendering boundaries.
+One simple rectangular building is generated at most per suitable parcel. Detailed architecture, lots with multiple structures, occupancy, residents, workplaces, trip purposes, lanes, and other population/economic systems are intentionally deferred.
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the complete generation and simulation boundaries, deterministic RNG domains, data contracts, and current limitations.

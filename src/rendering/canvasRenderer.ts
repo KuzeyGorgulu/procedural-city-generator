@@ -15,6 +15,9 @@ import {
 import { screenToWorld, worldToScreen } from './viewport';
 
 export type WorldViewMode =
+  | 'buildings'
+  | 'zoning'
+  | 'suitability'
   | 'parcels'
   | 'blocks'
   | 'elevation'
@@ -31,6 +34,23 @@ const SHALLOW_WATER: Rgb = [31, 116, 150];
 const LOW_LAND: Rgb = [66, 124, 87];
 const HIGH_LAND: Rgb = [185, 158, 111];
 const PEAK: Rgb = [226, 231, 224];
+
+const ZONE_COLORS = {
+  residential: '#8fc7a3',
+  commercial: '#e7b45f',
+  industrial: '#a98fc4',
+  'mixed-use': '#de8f75',
+  civic: '#6db5d8',
+  green: '#5fa76f',
+} as const;
+
+const BUILDING_COLORS = {
+  residential: '#d7eadc',
+  commercial: '#f5ce7b',
+  industrial: '#c6add9',
+  'mixed-use': '#efa38b',
+  civic: '#8fd0eb',
+} as const;
 
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
@@ -252,6 +272,62 @@ function drawUrbanStructure(
   context.restore();
 }
 
+function drawZoning(
+  context: CanvasRenderingContext2D,
+  urban: UrbanStructure,
+  camera: Camera,
+  viewport: ViewportSize,
+  suitabilityMode: boolean,
+  fillAlpha = 0.58,
+): void {
+  const parcelsById = new Map(urban.parcels.map((parcel) => [parcel.id, parcel]));
+  context.save();
+  for (const zoning of urban.zoning) {
+    const parcel = parcelsById.get(zoning.parcelId);
+    if (!parcel) continue;
+    context.beginPath();
+    tracePolygon(context, parcel.polygon, camera, viewport);
+    if (suitabilityMode) {
+      const score = clamp01(zoning.suitability.score);
+      const red = Math.round(202 - score * 105);
+      const green = Math.round(82 + score * 112);
+      const blue = Math.round(76 + score * 42);
+      context.fillStyle = zoning.suitability.developable
+        ? `rgba(${red}, ${green}, ${blue}, ${fillAlpha})`
+        : `rgba(214, 80, 82, ${fillAlpha})`;
+    } else {
+      context.globalAlpha = fillAlpha;
+      context.fillStyle = ZONE_COLORS[zoning.zone];
+    }
+    context.fill();
+    context.globalAlpha = 1;
+    context.strokeStyle = 'rgba(237, 242, 235, 0.66)';
+    context.lineWidth = 0.8;
+    context.stroke();
+  }
+  context.restore();
+}
+
+function drawBuildings(
+  context: CanvasRenderingContext2D,
+  urban: UrbanStructure,
+  camera: Camera,
+  viewport: ViewportSize,
+): void {
+  drawZoning(context, urban, camera, viewport, false, 0.2);
+  context.save();
+  for (const building of urban.buildings) {
+    context.beginPath();
+    tracePolygon(context, building.footprint, camera, viewport);
+    context.fillStyle = BUILDING_COLORS[building.use];
+    context.fill();
+    context.strokeStyle = '#18212a';
+    context.lineWidth = Math.min(2.2, 0.8 + building.floorCount * 0.12);
+    context.stroke();
+  }
+  context.restore();
+}
+
 function strokeRoadType(
   context: CanvasRenderingContext2D,
   graph: RoadGraph,
@@ -359,7 +435,14 @@ export function renderWorld(
   context.fillRect(0, 0, viewport.width, viewport.height);
 
   context.save();
-  if (mode === 'roadGraph' || mode === 'blocks' || mode === 'parcels') {
+  if (
+    mode === 'roadGraph' ||
+    mode === 'blocks' ||
+    mode === 'parcels' ||
+    mode === 'zoning' ||
+    mode === 'buildings' ||
+    mode === 'suitability'
+  ) {
     context.globalAlpha = mode === 'roadGraph' ? 0.58 : 0.72;
   }
   drawTerrain(
@@ -378,6 +461,12 @@ export function renderWorld(
       viewport,
       mode === 'parcels',
     );
+  } else if (mode === 'zoning') {
+    drawZoning(context, world.urban, camera, viewport, false);
+  } else if (mode === 'suitability') {
+    drawZoning(context, world.urban, camera, viewport, true);
+  } else if (mode === 'buildings') {
+    drawBuildings(context, world.urban, camera, viewport);
   }
   drawRoads(context, world.roads, camera, viewport, mode === 'roadGraph');
   if (traffic) drawTraffic(context, traffic, camera, viewport);
