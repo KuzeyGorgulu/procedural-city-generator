@@ -253,6 +253,43 @@ h1 {
   white-space: nowrap;
 }
 
+.population-toolbar {
+  padding: 10px 18px;
+  background: rgb(16 25 41 / 82%);
+  border-bottom: 1px solid #243148;
+}
+
+.population-stats {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(74px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.population-stats div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.population-stats dt {
+  color: #68778c;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.population-stats dd {
+  overflow: hidden;
+  margin: 0;
+  color: #d6dfe9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .traffic-toolbar {
   display: flex;
   min-height: 72px;
@@ -373,6 +410,10 @@ h1 {
     flex-basis: 100%;
     justify-content: flex-start;
   }
+
+  .population-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) {
@@ -418,6 +459,10 @@ h1 {
   .traffic-toolbar {
     gap: 10px;
     padding-inline: 14px;
+  }
+
+  .population-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .traffic-actions {

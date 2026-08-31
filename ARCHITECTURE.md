@@ -1,18 +1,19 @@
-# Phase 5 Architecture
+# Phase 6 Architecture
 
 ## Goal and deterministic contract
 
-Procedural City Generator has a deterministic foundation, queryable terrain, a terrain-responsive planar road graph, explicit road-bounded blocks and parcels, spatial zoning, frontage-aligned buildings, and a deterministic traffic simulation. Phase 5 extends the static world from parcels into development data while preserving the separation from Phase 4's dynamic traffic state.
+Procedural City Generator has a deterministic physical city, a separately initialized synthetic population, and a deterministic traffic simulation. Phase 6 derives homes, households, citizens, workplace capacity, and employment assignments from Phase 5 buildings without adding people to the immutable generated `World` or connecting them to traffic demand.
 
 The project contract remains:
 
 ```text
 (normalized seed, generator version) -> world
+(world identity, population version) -> population state
 ```
 
-For identical inputs, `generateWorld` returns deeply identical, JSON-serializable data. Generation has no clock, browser, React, rendering, viewport, or ambient random-state dependency.
+For identical inputs, `generateWorld` and `generatePopulation` return deeply identical, JSON-serializable data. Neither has a clock, browser, React, rendering, viewport, or ambient random-state dependency.
 
-`GENERATOR_VERSION` is `phase-5.0`: zoning and buildings are part of the generated world, so changing those contracts intentionally advances the world version. Under the existing root-seed convention, a version change creates a new deterministic world for the same textual seed. Traffic retains its independent `phase-4.0` simulation version and derived seed domain. Only the current generator remains executable; historical generators and save migrations are deferred until persistence requirements are known.
+`GENERATOR_VERSION` remains `phase-5.0`: Phase 6 does not change physical city generation. Population has an independent `phase-6.0` model version and derived seed domain; traffic retains its independent `phase-4.0` simulation version. Under the existing root-seed convention, only a deliberate generated-world version change creates new physical geometry for the same textual seed. Historical generators and save migrations remain deferred until persistence requirements are known.
 
 ## Modules and boundaries
 
@@ -56,6 +57,16 @@ src/
     canvasRenderer.ts           Canvas world visualization
     trafficRenderer.ts          stateless vehicle and selected-route drawing
     viewport.ts                 camera transforms
+  population/
+    types.ts                    serializable household/citizen/job contracts
+    config.ts                   centralized capacity and demographic constants
+    capacity.ts                 housing and workplace capacity derivation
+    accessibility.ts            road access, components, network travel times
+    households.ts               household composition and citizen generation
+    employment.ts               reachable deterministic job assignment
+    metrics.ts                  aggregate population metrics
+    queries.ts                  citizen, household, workplace, occupancy lookup
+    generatePopulation.ts       pure population-layer composition
   simulation/traffic/
     trafficNetwork.ts           read-only road-to-routing adapter
     routing.ts                  deterministic travel-time A*
@@ -121,6 +132,24 @@ buildings/v1
 ```
 
 Terrain remains under `terrain/v1`. Block extraction is deterministic and consumes no randomness. Each block's parcels use a block-local stream; because forks derive from immutable stream keys, generating another block or consuming an unrelated domain cannot shift existing parcel geometry. Zoning and buildings receive independent root domains and stable block/parcel forks. Their RNG consumption cannot perturb terrain, roads, parcels, each other, or traffic.
+
+Population initialization derives a separate seed from `(generated-world version, normalized world seed, population version)`:
+
+```text
+population/phase-6.0
+  households
+    building/<building-id>/occupancy
+    building/<building-id>/dwelling/<index>/size
+  citizens
+    household/<household-id>/composition
+  employment
+    preferences/home/<building-id>/workplace/<workplace-id>
+    citizen/<citizen-id>/assignment-priority
+    citizen/<citizen-id>/participation
+    citizen/<citizen-id>/workplace-choice
+```
+
+Named entity streams derive from immutable parent IDs. Household composition changes cannot shift employment randomness, and no population RNG is consumed by the static world or traffic simulation.
 
 ## Regional anchors and arterial strategy
 
@@ -248,6 +277,38 @@ Footprints must be finite, simple, positive-area polygons of at least 180 square
 
 Coverage ranges, setbacks, floor ranges, and usable-area ratios differ by use. Floor count also responds deterministically to development intensity, centrality, access, and suitability. Height is `floorCount * 3.2` meters; gross floor area is footprint area times floors; usable floor area applies a use-specific circulation/service allowance. Stable building IDs derive from parcel IDs, and every record retains its primary parcel frontage index and canonical road-edge ID for future entrances and trip demand.
 
+## Population state and version boundary
+
+`PopulationState` is plain serializable data containing population version/seed, households, citizens, workplaces, building occupancy summaries, and aggregate metrics. It references stable Phase 5 building IDs but stores no building geometry and never becomes part of `World`.
+
+A household records its home building and member citizen IDs. A citizen records age, life stage, workforce eligibility, labor-force participation, household/home IDs, employment status, and optional workplace/work-building IDs. A workplace is one abstract capacity pool per eligible building; it stores total capacity, filled jobs, worker IDs, and derived road access. No individual Job objects, companies, or schedules are created.
+
+## Housing and workplace capacity
+
+All assumptions are centralized in `population/config.ts`. One dwelling requires 95 square meters of residential usable floor area and has a defensive maximum resident capacity of five. Residential buildings allocate all usable area to housing. Mixed-use buildings partition usable area exactly once: 55% residential and 45% employment. Commercial, industrial, civic, and mixed-use employment areas use 55, 125, 65, and 70 square meters per worker respectively. Pure residential buildings have no job capacity, and pure commercial/industrial buildings have no housing capacity.
+
+Each residential-capable building receives a deterministic occupancy target from 76% through 91% of dwelling capacity. One occupied dwelling creates one household. Household size follows a bounded weighted distribution: 22% one person, 32% two, 21% three, 20% four, and 5% five. Every citizen object represents one resident; there is no hidden population scaling factor.
+
+## Households, citizens, and demographics
+
+Household IDs derive from building ID and dwelling index. Citizen IDs derive from household ID and member index, so identities remain stable without UUIDs, clocks, or global random indices. Household composition is coarse but internally safe: single homes contain adults or older adults; pairs may contain adults, older adults, or one adult with a dependent; larger households contain one or two working-age adults, dependents, and occasional older relatives.
+
+Numeric age maps to child (0–12), teen (13–17), working-age (18–64), or older-adult (65+). Only working-age citizens are workforce eligible. Non-working-age citizens use the explicit `not-working-age` employment status. No names, income, health, personality, social relationships, education, or emotional attributes are generated.
+
+## Road access and employment allocation
+
+The Phase 4 `TrafficNetwork` is reused as a read-only routing adapter. Each building resolves its canonical frontage road edge to the nearest endpoint node and a deterministic connected-component ID. A network-time Dijkstra pass runs once per home building, producing travel-time costs to workplace access nodes without retaining thousands of route objects.
+
+Workplace preference lists rank reachable jobs by network travel time with a bounded stable pair-specific jitter. Each participating worker chooses among up to six nearby workplaces with remaining capacity; later ranked jobs provide a bounded fallback when those fill. This balances geographical plausibility and deterministic variation without an all-citizens-by-all-workplaces search. The labor-force participation target is 82%. A working-age citizen outside that deterministic participation draw is `not-in-labor-force`. A participant without a valid job because of capacity or connectivity is `unemployed`; an assigned participant is `employed`. Cross-component assignments are never made.
+
+Employment creates assignments only. It does not create commute routes, vehicles, schedules, or traffic demand, and Phase 4 traffic remains synthetic.
+
+## Occupancy indices and population metrics
+
+Every Phase 5 building receives a `BuildingOccupancy` summary with residential/employment area shares, dwelling and resident capacity, occupied homes, residents, household IDs, job capacity, filled jobs, occupancy ratios, and optional road access/component IDs. These summaries support building-level rendering and future simulation without scanning citizens every frame.
+
+Population metrics expose population, households, average household size, residential buildings used, dwelling/resident capacity, housing occupancy, working-age population, labor-force population, employed, unemployed, and not-in-labor-force populations, participation/employment/unemployment rates, job capacity, filled/vacant jobs, residents by zone, and filled jobs by building use. Employment and unemployment rates use labor-force participants as their denominator. Query functions provide citizen, household, workplace, building occupancy, building residents, and building workers by stable ID.
+
 ## Urban queries and statistics
 
 The public query layer provides ID lookup, parcels and buildings by block, zoning and buildings by parcel, point containment, polygon centroids, and derived counts/areas. Urban statistics include block, parcel, and building counts, total gross floor area, and counts by zone. No spatial index is introduced at the current scale. Statistics are derived rather than duplicated in canonical world data.
@@ -256,17 +317,17 @@ The public query layer provides ID lookup, parcels and buildings by block, zonin
 
 ## Rendering and debug views
 
-Canvas renders terrain, the selected development layer, and finally roads and traffic. Buildings mode presents zone-colored building footprints over subdued parcels. Zoning mode fills each parcel by assigned zone. Development-suitability mode uses an undevelopable color plus a low-to-high suitability ramp. Blocks and Parcels modes continue exposing the underlying Phase 3 geometry. Elevation, slope, water/land, and road-graph views remain available. Road graph mode mutes terrain and highlights graph intersections.
+Canvas renders terrain, the selected aggregate layer, and finally roads and traffic. Population occupancy colors residential-capable buildings by occupied-dwelling ratio; Jobs/employment colors workplace buildings by filled-job ratio and marks capacity through the outline. Both consume `BuildingOccupancy`, never individual citizens. Buildings mode presents zone-colored footprints over subdued parcels. Zoning, Development suitability, Blocks, Parcels, Elevation, Slope, Water/Land, and Road graph remain available.
 
 Elevation colors receive fixed-light hillshade derived from each cell's elevation gradient. The pure helper approximates a surface normal with explicit vertical exaggeration, ambient light, and a northwestern light vector. This derived brightness is deterministic and rendering-only: it does not modify elevation, slope, terrain queries, routing, or canonical world data. The stronger elevation view remains subtle beneath roads and urban overlays.
 
-Rendering never changes world data and is not consulted during generation.
+React memoizes one population initialization per generated world and displays only aggregate metrics. It does not store per-citizen UI state or update population each frame. Rendering never changes world or population data and is not consulted during generation or allocation.
 
 ## Static world and dynamic simulation boundary
 
-`World` remains the plain, JSON-serializable output of generation: terrain, roads, blocks, parcels, zoning, and buildings. Zoning and buildings are static generated data and never change when traffic runs. `TrafficSimulationState` is separate dynamic data containing the simulation seed/version, tick and elapsed time, vehicles, population target, deterministic spawn serial, and completed-trip totals. It never becomes part of `World`, and simulation functions only read the canonical road graph and development context through derived adapters.
+`World` remains the plain, JSON-serializable physical city: terrain, roads, blocks, parcels, zoning, and buildings. `PopulationState` is a separate, currently static initialization layer containing identity, capacity, home/job assignments, occupancy summaries, and metrics. `TrafficSimulationState` is separate dynamic data containing clock and vehicle state. Neither population nor traffic becomes part of `World`; both only read canonical IDs and geometry through derived adapters.
 
-The simulation controller is independent of React and Canvas. React owns user controls and publishes throttled aggregate metrics; it does not store per-frame vehicle arrays. Canvas subscribes to controller notifications and consumes the current state for drawing. Neither rendering nor viewport state participates in traffic updates.
+The traffic controller is independent of React and Canvas. React owns controls and publishes throttled aggregate traffic metrics; it does not store per-frame vehicle arrays. Canvas subscribes to controller notifications and consumes aggregate population plus current traffic state for drawing. Neither rendering nor viewport state participates in traffic updates, population allocation, or physical-world generation.
 
 ## Traffic routing graph
 
@@ -312,10 +373,10 @@ The traffic renderer draws simple oriented vehicle markers after roads and urban
 
 ## Future simulation compatibility
 
-Future phases can query block membership, parcel geometry/area/centroid, suitability constraints, zone and intensity, exact road-facing parcel edges, building use/height/floor area, routing arcs, vehicle state, and segment occupancy without reconstructing Canvas geometry.
+Future phases can query stable citizen/household/workplace identities, home and work buildings, household composition, workforce eligibility, building capacity and occupancy, exact road access, network reachability, routing arcs, vehicle state, and segment occupancy without reconstructing Canvas geometry.
 
-Population, jobs, schedules, transit, and economy can turn building floor area and use into residents, workers, services, and real trip demand while retaining the routing, clock, and vehicle-state boundaries. Congestion, travel-time, noise, stress, and other feedback systems can consume the exposed occupancy and trip metrics instead of scraping UI state.
+Schedules can assign home/work activities directly from Phase 6 references. A later trip-demand layer can request routes between stored building access nodes and deliberately translate selected citizen trips into traffic or transit demand. Congestion, travel time, noise, stress, and later behavioral systems can consume those explicit interfaces instead of scraping UI state.
 
 ## Intentionally deferred
 
-Phase 5 does not implement coastline- or world-boundary-generated blocks, terrain clipping, curved parcel boundaries, cadastral realism, ownership, multiple buildings per parcel, detailed architecture, entrances, alleys, driveways, sidewalks, parking, functional park simulation, population, citizens, home/work assignment, occupancy, commuting schedules, economy, pedestrians, public transport, multi-lane behavior, lane changing, overtaking, optimized traffic signals, accidents, emergency vehicles, dynamic congestion-aware rerouting, noise, pollution, emotions, or dynamic subdivision. Bridges and grade separation also remain absent. Opposing Phase 4 vehicles still share the visual road centerline. These are intentional scope boundaries, not data inferred in rendering.
+Phase 6 does not implement daily schedules, activities, commute trips, population-driven traffic, schools as institutions, companies, professions, salaries, income, land value, rents, taxes, economic production, shopping, leisure, citizen movement, pedestrians, public transport, parking, migration, birth/death, relationships, health, personality, emotions, stress, noise, or pollution feedback. Existing physical-city limitations such as one building per parcel, no detailed architecture, bridges, grade separation, lanes, and coastline-generated blocks also remain. Opposing Phase 4 vehicles still share the visual road centerline. These are intentional scope boundaries.

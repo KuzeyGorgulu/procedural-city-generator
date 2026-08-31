@@ -6,6 +6,7 @@ import type {
   UrbanStructure,
   World,
 } from '../world/types';
+import type { PopulationState } from '../population/types';
 import type { Camera, ViewportSize } from './viewport';
 import { drawTraffic, type TrafficRenderInput } from './trafficRenderer';
 import {
@@ -15,6 +16,8 @@ import {
 import { screenToWorld, worldToScreen } from './viewport';
 
 export type WorldViewMode =
+  | 'population'
+  | 'jobs'
   | 'buildings'
   | 'zoning'
   | 'suitability'
@@ -328,6 +331,58 @@ function drawBuildings(
   context.restore();
 }
 
+function drawPopulationLayer(
+  context: CanvasRenderingContext2D,
+  urban: UrbanStructure,
+  population: PopulationState,
+  camera: Camera,
+  viewport: ViewportSize,
+  mode: 'population' | 'jobs',
+): void {
+  drawZoning(context, urban, camera, viewport, false, 0.12);
+  const occupancyByBuildingId = new Map(
+    population.buildingOccupancy.map((entry) => [entry.buildingId, entry]),
+  );
+  context.save();
+  for (const building of urban.buildings) {
+    const occupancy = occupancyByBuildingId.get(building.id);
+    context.beginPath();
+    tracePolygon(context, building.footprint, camera, viewport);
+    if (!occupancy) {
+      context.fillStyle = 'rgba(85, 94, 108, 0.38)';
+      context.fill();
+      continue;
+    }
+    const capacity =
+      mode === 'population'
+        ? occupancy.dwellingCapacity
+        : occupancy.jobCapacity;
+    const ratio =
+      mode === 'population'
+        ? occupancy.housingOccupancyRatio
+        : occupancy.employmentOccupancyRatio;
+    if (capacity === 0) {
+      context.fillStyle = 'rgba(72, 81, 94, 0.46)';
+    } else if (mode === 'population') {
+      context.fillStyle = colorToCss(
+        mixColor([75, 126, 153], [239, 106, 162], (ratio - 0.7) / 0.25),
+      );
+    } else {
+      context.fillStyle = colorToCss(
+        mixColor([82, 105, 151], [247, 185, 76], ratio),
+      );
+    }
+    context.fill();
+    context.strokeStyle = capacity === 0 ? '#26313e' : '#ecf2f6';
+    context.lineWidth =
+      capacity === 0
+        ? 0.7
+        : 0.8 + Math.min(1.7, Math.log10(capacity + 1) * 0.45);
+    context.stroke();
+  }
+  context.restore();
+}
+
 function strokeRoadType(
   context: CanvasRenderingContext2D,
   graph: RoadGraph,
@@ -428,6 +483,7 @@ export function renderWorld(
   devicePixelRatio: number,
   mode: WorldViewMode,
   traffic?: TrafficRenderInput,
+  population?: PopulationState,
 ): void {
   context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   context.clearRect(0, 0, viewport.width, viewport.height);
@@ -441,7 +497,9 @@ export function renderWorld(
     mode === 'parcels' ||
     mode === 'zoning' ||
     mode === 'buildings' ||
-    mode === 'suitability'
+    mode === 'suitability' ||
+    mode === 'population' ||
+    mode === 'jobs'
   ) {
     context.globalAlpha = mode === 'roadGraph' ? 0.58 : 0.72;
   }
@@ -467,6 +525,15 @@ export function renderWorld(
     drawZoning(context, world.urban, camera, viewport, true);
   } else if (mode === 'buildings') {
     drawBuildings(context, world.urban, camera, viewport);
+  } else if ((mode === 'population' || mode === 'jobs') && population) {
+    drawPopulationLayer(
+      context,
+      world.urban,
+      population,
+      camera,
+      viewport,
+      mode,
+    );
   }
   drawRoads(context, world.roads, camera, viewport, mode === 'roadGraph');
   if (traffic) drawTraffic(context, traffic, camera, viewport);

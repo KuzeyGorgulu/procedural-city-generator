@@ -5,13 +5,16 @@ import type { WorldViewMode } from '../rendering/canvasRenderer';
 import { GenerationControls } from '../ui/GenerationControls';
 import { WorldCanvas } from '../ui/WorldCanvas';
 import { TrafficControls } from '../ui/TrafficControls';
+import { PopulationSummary } from '../ui/PopulationSummary';
 import { getRoadStatistics } from '../world/roadQueries';
 import { getUrbanStatistics } from '../world/urbanQueries';
+import { generatePopulation } from '../population/generatePopulation';
 
 export function App() {
   const { seedInput, setSeedInput, world, generate, randomize } = useWorldGeneration();
   const traffic = useTrafficSimulation(world);
-  const [viewMode, setViewMode] = useState<WorldViewMode>('buildings');
+  const population = useMemo(() => generatePopulation(world), [world]);
+  const [viewMode, setViewMode] = useState<WorldViewMode>('population');
   const [selectedVehicle, setSelectedVehicle] = useState<
     { readonly simulationSeed: string; readonly vehicleId: string } | undefined
   >();
@@ -32,7 +35,7 @@ export function App() {
     <main className="app-shell">
       <header className="app-header">
         <div>
-          <p className="eyebrow">Phase 5 · Zoning &amp; Buildings</p>
+          <p className="eyebrow">Phase 6 · Population, Homes &amp; Jobs</p>
           <h1>Procedural City Generator</h1>
           <p className="subtitle">A deterministic world, one seed at a time.</p>
         </div>
@@ -48,7 +51,7 @@ export function App() {
       <section className="viewport-panel" aria-labelledby="viewport-title">
         <div className="viewport-toolbar">
           <div>
-            <h2 id="viewport-title">Developed city and traffic</h2>
+            <h2 id="viewport-title">Populated city and traffic</h2>
             <p>Drag to pan · Scroll to zoom · Click a vehicle for its route</p>
           </div>
           <label className="terrain-view-field">
@@ -60,6 +63,8 @@ export function App() {
               }
               value={viewMode}
             >
+              <option value="population">Population occupancy</option>
+              <option value="jobs">Jobs / employment</option>
               <option value="buildings">Buildings</option>
               <option value="zoning">Zoning</option>
               <option value="suitability">Development suitability</option>
@@ -94,6 +99,7 @@ export function App() {
             </div>
           </dl>
         </div>
+        <PopulationSummary metrics={population.metrics} />
         <TrafficControls
           onReset={traffic.reset}
           onSpeedChange={traffic.setSpeedMultiplier}
@@ -114,6 +120,7 @@ export function App() {
                   : undefined,
               )
             }
+            population={population}
             selectedVehicleId={selectedVehicleId}
             trafficController={traffic.controller}
             viewMode={viewMode}

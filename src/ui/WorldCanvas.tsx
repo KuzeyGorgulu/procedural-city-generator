@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { renderWorld, type WorldViewMode } from '../rendering/canvasRenderer';
 import type { TrafficSimulationController } from '../simulation/traffic/trafficController';
+import type { PopulationState } from '../population/types';
 import { getVehiclePose } from '../simulation/traffic/vehicleQueries';
 import { pointDistance } from '../world/roadGeometry';
 import {
@@ -17,6 +18,7 @@ interface WorldCanvasProps {
   readonly world: World;
   readonly viewMode: WorldViewMode;
   readonly trafficController: TrafficSimulationController;
+  readonly population: PopulationState;
   readonly selectedVehicleId?: string;
   readonly onSelectVehicle: (vehicleId?: string) => void;
 }
@@ -27,6 +29,7 @@ export function WorldCanvas({
   world,
   viewMode,
   trafficController,
+  population,
   selectedVehicleId,
   onSelectVehicle,
 }: WorldCanvasProps) {
@@ -84,10 +87,19 @@ export function WorldCanvas({
           state: trafficController.state,
           selectedVehicleId,
         },
+        population,
       );
     draw();
     return trafficController.subscribe(draw);
-  }, [world, camera, viewport, viewMode, trafficController, selectedVehicleId]);
+  }, [
+    world,
+    camera,
+    viewport,
+    viewMode,
+    trafficController,
+    selectedVehicleId,
+    population,
+  ]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -212,7 +224,7 @@ export function WorldCanvas({
 
   return (
     <canvas
-      aria-label="Generated city and traffic viewport. Drag or use arrow keys to pan; scroll or use plus and minus to zoom; click a vehicle to inspect its route."
+      aria-label="Generated city, population, jobs, and traffic viewport. Drag or use arrow keys to pan; scroll or use plus and minus to zoom; click a vehicle to inspect its route."
       className={isDragging ? 'world-canvas is-dragging' : 'world-canvas'}
       onKeyDown={handleKeyDown}
       onPointerCancel={handlePointerCancel}
