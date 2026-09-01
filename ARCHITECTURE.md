@@ -1,19 +1,23 @@
-# Phase 6 Architecture
+# Phase 8 Architecture
 
 ## Goal and deterministic contract
 
-Procedural City Generator has a deterministic physical city, a separately initialized synthetic population, and a deterministic traffic simulation. Phase 6 derives homes, households, citizens, workplace capacity, and employment assignments from Phase 5 buildings without adding people to the immutable generated `World` or connecting them to traffic demand.
+Procedural City Generator has a deterministic physical city, a separately initialized synthetic population, deterministic daily mobility plans, a deterministic traffic simulation, and a separate wellbeing foundation. Phase 8 derives explainable static environmental exposure and consumes completed commute outcomes without adding emotional fields to `Citizen` or mutating the generated `World`, population, mobility plans, or traffic state.
 
 The project contract remains:
 
 ```text
 (normalized seed, generator version) -> world
 (world identity, population version) -> population state
+(world identity, population identity, mobility version) -> mobility state
+(world, demand mode, simulation inputs, fixed tick count) -> traffic state
+(world, population, mobility identity, wellbeing version) -> wellbeing baseline
+(baseline, scenario seed, ordered completed commute events) -> wellbeing scenario state
 ```
 
-For identical inputs, `generateWorld` and `generatePopulation` return deeply identical, JSON-serializable data. Neither has a clock, browser, React, rendering, viewport, or ambient random-state dependency.
+For identical inputs, `generateWorld`, `generatePopulation`, and `generateMobility` return deeply identical, JSON-serializable data. None has a clock, browser, React, rendering, viewport, or ambient random-state dependency.
 
-`GENERATOR_VERSION` remains `phase-5.0`: Phase 6 does not change physical city generation. Population has an independent `phase-6.0` model version and derived seed domain; traffic retains its independent `phase-4.0` simulation version. Under the existing root-seed convention, only a deliberate generated-world version change creates new physical geometry for the same textual seed. Historical generators and save migrations remain deferred until persistence requirements are known.
+`GENERATOR_VERSION` remains `phase-5.0`; population remains `phase-6.0`; mobility remains `phase-7.0`; traffic retains its compatible `phase-4.0` engine version; wellbeing has an independent `phase-8.0` model version and identity. Phase 8 does not change the fixed-tick movement model or physical-world generation. Under the existing root-seed convention, only a deliberate generated-world version change creates new physical geometry for the same textual seed. Historical generators and save migrations remain deferred until persistence requirements are known.
 
 ## Modules and boundaries
 
@@ -67,11 +71,27 @@ src/
     metrics.ts                  aggregate population metrics
     queries.ts                  citizen, household, workplace, occupancy lookup
     generatePopulation.ts       pure population-layer composition
+  mobility/
+    types.ts                    daily-plan and immutable commute contracts
+    config.ts                   mobility version and routine assumptions
+    generateMobility.ts         per-citizen schedules and cached routing
+    metrics.ts                  static morning/evening commute metrics
+    queries.ts                  indexed citizen/trip lookups
+    trafficDemand.ts            plain mobility-to-traffic demand adapter
+  wellbeing/
+    config.ts                   centralized exposure and response weights
+    environmentalExposure.ts    cached building/citizen exposure profiles
+    initializeWellbeing.ts      bounded deterministic citizen baselines
+    commuteImpact.ts            completed-trip events and causal deltas
+    updateWellbeing.ts          idempotent scenario-state reducer and reset
+    metrics.ts                  reusable aggregate score metrics
+    queries.ts                  citizen explanations and building summaries
   simulation/traffic/
     trafficNetwork.ts           read-only road-to-routing adapter
     routing.ts                  deterministic travel-time A*
-    spawning.ts                 bounded seeded trip demand
-    trafficSimulation.ts        pure fixed-tick movement and interaction
+    spawning.ts                 bounded seeded synthetic demand
+    populationDemand.ts         deterministic commute queue and outcomes
+    trafficSimulation.ts        source-neutral fixed-tick movement
     trafficController.ts        clock, accumulator, controls, subscriptions
     trafficMetrics.ts           reusable aggregate traffic metrics
     vehicleQueries.ts           route-derived vehicle poses and progress
@@ -150,6 +170,22 @@ population/phase-6.0
 ```
 
 Named entity streams derive from immutable parent IDs. Household composition changes cannot shift employment randomness, and no population RNG is consumed by the static world or traffic simulation.
+
+Mobility derives another seed from `(generated-world version, normalized world seed, population version, population seed, mobility version)`. Each citizen receives stable named forks:
+
+```text
+mobility/phase-7.0
+  citizen/<citizen-id>
+    routine/work-start-cluster
+    routine/work-start
+    routine/work-end
+    routine/departure-jitter
+    routine/return-jitter
+```
+
+Adding or changing an unrelated citizen cannot shift another citizen's schedule. Mobility consumes no `Math.random`, timestamps, UUIDs, browser state, or shared mutable RNG. Its randomness cannot perturb the world, population, or synthetic traffic streams.
+
+Wellbeing derives identity from the generated-world, population, exposure, mobility, and `phase-8.0` version identities. Phase 8 currently consumes no random values: static exposure is a pure geometry/capacity query and commute response is a pure function of recorded trip outcomes. Scenario event IDs include the deterministic traffic simulation seed and stable trip ID, so replaying a completed event is harmless and resetting a scenario recreates the same baseline.
 
 ## Regional anchors and arterial strategy
 
@@ -301,7 +337,15 @@ The Phase 4 `TrafficNetwork` is reused as a read-only routing adapter. Each buil
 
 Workplace preference lists rank reachable jobs by network travel time with a bounded stable pair-specific jitter. Each participating worker chooses among up to six nearby workplaces with remaining capacity; later ranked jobs provide a bounded fallback when those fill. This balances geographical plausibility and deterministic variation without an all-citizens-by-all-workplaces search. The labor-force participation target is 82%. A working-age citizen outside that deterministic participation draw is `not-in-labor-force`. A participant without a valid job because of capacity or connectivity is `unemployed`; an assigned participant is `employed`. Cross-component assignments are never made.
 
-Employment creates assignments only. It does not create commute routes, vehicles, schedules, or traffic demand, and Phase 4 traffic remains synthetic.
+Employment still creates assignments only. Phase 7 reads those stable assignments from `PopulationState`; it does not alter participation, job capacity, employment allocation, homes, or workplaces.
+
+## Daily plans and commute templates
+
+`MobilityState` is a static, JSON-serializable layer containing `phase-7.0` identity, one `CitizenDailyPlan` per citizen, immutable `CommuteTrip` templates, and derived metrics. It references stable citizen, workplace, building, access-node, and traffic-arc IDs without copying citizens or building geometry.
+
+Employed residents receive the sequence `home -> commute-to-work -> work -> commute-home -> home`. Work starts are clustered around 08:00, 08:30, and 09:00 with bounded deterministic variation; work duration is 450-540 planned minutes. Route time and a 4-16 minute departure buffer determine the morning departure and evening home arrival. All activities are ordered, non-overlapping, and contained in minute 0 through 1,440. Everyone without an employment assignment remains home for the entire Phase 7 day model; no school, shopping, leisure, or service trips are inferred.
+
+Each employed citizen normally owns stable `trip/<citizen-id>/work` and `trip/<citizen-id>/home` templates. The mobility planner reuses `buildPopulationAccessIndex`, the Phase 4 `TrafficNetwork`, and deterministic `findTrafficRoute`. Routes are cached by ordered access-node pair during initialization, so multiple citizens sharing home/work access do not repeat A* searches. A malformed assignment, missing building/access, or disconnected route produces explicit unreachable demand instead of teleportation or an invented connection.
 
 ## Occupancy indices and population metrics
 
@@ -317,15 +361,15 @@ The public query layer provides ID lookup, parcels and buildings by block, zonin
 
 ## Rendering and debug views
 
-Canvas renders terrain, the selected aggregate layer, and finally roads and traffic. Population occupancy colors residential-capable buildings by occupied-dwelling ratio; Jobs/employment colors workplace buildings by filled-job ratio and marks capacity through the outline. Both consume `BuildingOccupancy`, never individual citizens. Buildings mode presents zone-colored footprints over subdued parcels. Zoning, Development suitability, Blocks, Parcels, Elevation, Slope, Water/Land, and Road graph remain available.
+Canvas renders terrain, the selected aggregate layer, and finally roads and traffic. Wellbeing colors resident buildings from pre-aggregated building summaries by happiness, calm, stress, or tension; favorable/unfavorable color direction is explicit per dimension. Population occupancy colors residential-capable buildings by occupied-dwelling ratio; Jobs/employment colors workplace buildings by filled-job ratio and marks capacity through the outline. Buildings mode presents zone-colored footprints over subdued parcels. Zoning, Development suitability, Blocks, Parcels, Elevation, Slope, Water/Land, and Road graph remain available.
 
 Elevation colors receive fixed-light hillshade derived from each cell's elevation gradient. The pure helper approximates a surface normal with explicit vertical exaggeration, ambient light, and a northwestern light vector. This derived brightness is deterministic and rendering-only: it does not modify elevation, slope, terrain queries, routing, or canonical world data. The stronger elevation view remains subtle beneath roads and urban overlays.
 
-React memoizes one population initialization per generated world and displays only aggregate metrics. It does not store per-citizen UI state or update population each frame. Rendering never changes world or population data and is not consulted during generation or allocation.
+React memoizes population, mobility, the plain traffic-demand adapter, environmental exposure, initial wellbeing, and building-level wellbeing summaries at their natural identity boundaries. The wellbeing hook subscribes downstream of the traffic controller but publishes React state only on scenario changes, resets, or completed trips. It does not become the simulation clock or store per-frame vehicle arrays. Rendering never changes world, population, mobility, traffic, exposure, or wellbeing data and is not consulted during generation, allocation, planning, movement, or wellbeing updates.
 
 ## Static world and dynamic simulation boundary
 
-`World` remains the plain, JSON-serializable physical city: terrain, roads, blocks, parcels, zoning, and buildings. `PopulationState` is a separate, currently static initialization layer containing identity, capacity, home/job assignments, occupancy summaries, and metrics. `TrafficSimulationState` is separate dynamic data containing clock and vehicle state. Neither population nor traffic becomes part of `World`; both only read canonical IDs and geometry through derived adapters.
+`World` remains the plain, JSON-serializable physical city: terrain, roads, blocks, parcels, zoning, and buildings. `PopulationState` is a separate static initialization layer containing identity, capacity, home/job assignments, occupancy summaries, and metrics. `MobilityState` is another static layer containing planned activities and trips. `TrafficSimulationState` is separate dynamic data containing the clock, vehicles, queue status, and actual outcomes. `EnvironmentalExposureState` is a static derived cache, while `WellbeingState` is a distinct dynamic scenario layer. Population, mobility, exposure, and wellbeing are never inserted into `World`; traffic and wellbeing reducers never mutate any upstream layer.
 
 The traffic controller is independent of React and Canvas. React owns controls and publishes throttled aggregate traffic metrics; it does not store per-frame vehicle arrays. Canvas subscribes to controller notifications and consumes aggregate population plus current traffic state for drawing. Neither rendering nor viewport state participates in traffic updates, population allocation, or physical-world generation.
 
@@ -349,34 +393,74 @@ The Euclidean travel-time heuristic is admissible under the configured maximum s
 
 The simulation seed is derived from `(generator version, normalized world seed, traffic simulation version)`. Each vehicle serial and trip attempt receives a named RNG fork. Traffic consumes no ambient randomness and cannot shift terrain, road, block, or parcel RNG streams. For equal world seed, traffic version, target population, inputs, and tick count, complete traffic state is reproducible.
 
+## Population traffic demand and runtime outcomes
+
+`createTrafficDemandCatalog` translates `MobilityState` into a plain immutable adapter. This keeps traffic independent of population/mobility modules and avoids a circular dependency. The original seeded synthetic demand remains available. Morning and evening modes select their corresponding prepared routes and create a mode-specific deterministic simulation seed.
+
+Within a wave, planned departure minutes are mapped to scenario seconds at the documented 0.25-second-per-planned-minute rate. Trips become eligible in planned-departure order with trip ID as the explicit tie-breaker. A centralized safety policy admits at most four population trips per fixed tick and keeps at most 96 active population vehicles. Every excess trip remains represented as queued demand; there is no hidden commuter scale factor and no silent dropping. Same-access-node trips complete locally without fabricating a road vehicle, while invalid/unreachable templates retain an explicit unreachable status.
+
+The immutable `CommuteTrip` remains separate from `TripRuntimeState`. Runtime status progresses through `scheduled`, `queued`, `active`, and `completed`, or starts as `unreachable`. Actual departure, arrival, queue wait, and travel time are recorded without changing the planned schedule. Population vehicles store only stable provenance: citizen ID, trip ID, purpose, and origin/destination building IDs.
+
+Mobility metrics expose employed commuters, planned and eligible trips, queued/active/completed/unreachable counts, average estimated distance/time, average actual completed time, average queue wait, and maximum queue size. Static metrics also separate morning and evening estimates. Empty values resolve to zero rather than NaN or Infinity.
+
 ## Fixed-timestep clock and controls
 
 `TrafficSimulationController` accumulates scaled real time and advances pure `stepTrafficSimulation` updates in fixed 0.05-second ticks. Render frames may arrive at different rates without changing tick results. A frame-delta clamp and bounded catch-up prevent an inactive browser tab from causing an unbounded update burst.
 
-The controller exposes play, pause, toggle, reset, 0.5x/1x/2x/4x speed, and bounded target-population changes. Reset pauses, clears accumulated real time, and recreates the exact initial state for the current world seed and population target.
+The controller exposes play, pause, toggle, reset, 0.5x/1x/2x/4x speed, synthetic target-population changes, and synthetic/morning/evening demand selection. Reset pauses, clears accumulated real time, and recreates the exact initial state for the selected demand mode. Mode changes also reset and pause, preventing state from one wave from leaking into another.
 
 ## Vehicle movement and traffic interaction
 
-A `Vehicle` has a stable serial ID, origin and destination nodes, immutable planned route, current route-arc index and progress, current and desired speed, movement state, elapsed trip time, and distance travelled. Position and orientation are queries derived from the current arc rather than independent free-space physics.
+A `Vehicle` has a stable ID, source/provenance, origin and destination nodes, immutable planned route, current route-arc index and progress, current and desired speed, movement state, elapsed trip time, and distance travelled. Position and orientation are queries derived from the current arc rather than independent free-space physics. Movement and intersection code is source-neutral: synthetic and population vehicles obey identical traffic rules.
 
 Each tick groups vehicles by directed arc and sorts them once by progress. Followers use a minimum distance and time-gap target speed, then accelerate or brake toward that target. This avoids an all-pairs scan and prevents same-direction vehicles from collapsing onto one point.
 
 Vehicles approaching a graph node of degree three or greater request deterministic intersection admission. At most one request per intersection wins each tick, ordered by stable vehicle ID, and only when the outgoing arc has entrance clearance. Other requesters stop short in a queued state. This is intentionally a minimal right-of-way foundation, not lanes or signal control.
 
-Vehicles advance through any number of route arcs allowed by their tick distance and complete at their destination. Completed vehicles contribute trip-time totals and are replaced through the same deterministic bounded demand process. Missing or malformed route references fail safely instead of crashing the simulation.
+Vehicles advance through any number of route arcs allowed by their tick distance and complete at their destination. Synthetic mode replenishes completed vehicles toward its configured target; population modes record the matching trip outcome and admit later queued demand. Missing or malformed route references fail safely instead of crashing the simulation.
 
 ## Traffic metrics and rendering
 
 `getTrafficMetrics` exposes active vehicle count, completed trips, average current speed, average active-trip progress, average completed travel time, and per-directed-arc occupancy with source road-edge IDs. These are simulation queries available to future systems; the UI only formats their output.
 
-The traffic renderer draws simple oriented vehicle markers after roads and urban overlays, transformed by the same world camera. Queued vehicles receive a distinct color. Selecting a vehicle draws its graph route. Pan, zoom, view mode, and render frequency cannot mutate the generated world or traffic state.
+The traffic renderer draws simple oriented vehicle markers after roads and urban overlays, transformed by the same world camera. Queued and population vehicles receive distinct colors. Selecting a vehicle draws its graph route; the compact inspector shows source and population citizen/trip metadata where present. Pan, zoom, view mode, and render frequency cannot mutate generated or simulated state.
+
+## Environmental exposure and initial wellbeing
+
+`generateEnvironmentalExposure` builds one deterministic spatial working set and computes exposure once per physical building. Every citizen profile references the cached home and optional workplace exposure object; geometry is never rescanned once per resident. The current scale uses bounded building-level scans rather than a heavyweight GIS dependency.
+
+The exposure values are normalized gameplay proxies in `[0, 1]`:
+
+- Green access combines distance to green-zoned parcel boundaries with parcel area, favoring the strongest nearby space while retaining a smaller surrounding-green contribution.
+- Local density sums distance-weighted nearby building gross floor area. Density is recorded neutrally; only density above the centralized comfort threshold contributes pressure to wellbeing.
+- Road-noise proxy combines distance, canonical road length, and road class. Arterials carry a stronger weight than secondary streets. This is not a measured decibel model.
+- Home crowding uses only existing household size, resident-capacity occupancy, and dwelling occupancy. It does not invent rooms, wealth, or household relationships.
+- Workplace exposure reuses the same green, density, and road calculations when a citizen has an assigned workplace.
+
+`initializeWellbeing` applies centralized, inspectable factor vectors to four separate bounded 0-100 dimensions. Stress represents accumulated burden, tension represents acute agitation, calm represents restorative capacity, and happiness is a slower general positive state. Green exposure most strongly raises calm, road noise most strongly lowers calm and raises stress, high density adds modest pressure only beyond the comfort threshold, and crowding adds modest home pressure. The factor contribution vectors are retained per citizen for explanation and testing. No random personality, diagnosis, hidden mood label, or textual sentiment is generated.
+
+## Completed-commute wellbeing updates
+
+Wellbeing consumes immutable `TripRuntimeState` records only after a population trip reaches `completed`. Each event ID is `commute/<scenario-simulation-seed>/<trip-id>/completed`; processed IDs are stored in scenario state, making repeated notifications and replays idempotent.
+
+Commute impact separates three explainable signals:
+
+```text
+chronic burden    = bounded estimated route time / chronic reference
+unexpected delay = bounded excess actual travel time / expected time
+queue burden      = bounded recorded wait time / queue reference
+```
+
+The baseline route duration contributes a small chronic burden even when the trip proceeds as expected. Unexpected delay and queue wait form acute friction: tension receives the strongest response, stress a smaller response, calm moves oppositely, and happiness changes most slowly. Scores clamp defensively to 0-100. No wall-clock time, FPS, viewport input, React render count, random draw, or current traffic occupancy is consulted by this reducer.
+
+Traffic reset or demand-mode change restores initial environmental scores, clears processed commute IDs, and starts a separate deterministic scenario. Morning and evening traffic seeds therefore cannot leak effects into each other. Aggregate queries expose citizen count, average/minimum/maximum scores, commute-affected citizen count, average absolute commute tension impact, home-building score summaries, and selected-citizen causal details.
 
 ## Future simulation compatibility
 
-Future phases can query stable citizen/household/workplace identities, home and work buildings, household composition, workforce eligibility, building capacity and occupancy, exact road access, network reachability, routing arcs, vehicle state, and segment occupancy without reconstructing Canvas geometry.
+Future phases can query stable citizen/household/workplace identities, home and work buildings, household composition, workforce eligibility, building capacity and occupancy, daily activities, planned commute routes, exact road access, runtime trip status, actual travel/wait times, vehicle state, segment occupancy, cached environmental exposure, bounded wellbeing scores, factor contributions, and processed commute impacts without reconstructing Canvas geometry.
 
-Schedules can assign home/work activities directly from Phase 6 references. A later trip-demand layer can request routes between stored building access nodes and deliberately translate selected citizen trips into traffic or transit demand. Congestion, travel time, noise, stress, and later behavioral systems can consume those explicit interfaces instead of scraping UI state.
+Later systems can consume these explicit interfaces instead of scraping UI state or changing Phase 7 identity. Phase 8 intentionally stops at observation: scores do not yet alter citizen decisions, traffic demand, land use, employment, or city growth. A future city-day clock can execute the retained daily minutes without regenerating routines.
 
 ## Intentionally deferred
 
-Phase 6 does not implement daily schedules, activities, commute trips, population-driven traffic, schools as institutions, companies, professions, salaries, income, land value, rents, taxes, economic production, shopping, leisure, citizen movement, pedestrians, public transport, parking, migration, birth/death, relationships, health, personality, emotions, stress, noise, or pollution feedback. Existing physical-city limitations such as one building per parcel, no detailed architecture, bridges, grade separation, lanes, and coastline-generated blocks also remain. Opposing Phase 4 vehicles still share the visual road centerline. These are intentional scope boundaries.
+Phase 8 does not implement a continuous 24-hour city clock, non-work trips, schools as institutions, companies, professions, salaries, income, land value, rents, taxes, economic production, shopping, leisure behavior, pedestrians, public transport, parking, migration, birth/death, relationships, health diagnosis, personality, social contagion, long-term adaptation, recovery/decay, wellbeing-driven behavior, measured acoustics, or pollution feedback. Buildings, population, employment, and routines remain fixed after initialization. Existing physical-city limitations such as one building per parcel, no detailed architecture, bridges, grade separation, lanes, and coastline-generated blocks also remain. Opposing vehicles still share the visual road centerline. These are intentional scope boundaries.

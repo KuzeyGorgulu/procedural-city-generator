@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { TrafficSpeedMultiplier } from '../simulation/traffic/config';
+import {
+  TRAFFIC_CONFIG,
+  type TrafficSpeedMultiplier,
+} from '../simulation/traffic/config';
 import { TrafficSimulationController } from '../simulation/traffic/trafficController';
 import type { TrafficMetrics } from '../simulation/traffic/types';
+import type {
+  MobilityRuntimeMetrics,
+  TrafficDemandCatalog,
+  TrafficDemandMode,
+} from '../simulation/traffic/types';
 import type { World } from '../world/types';
 
 export interface TrafficUiSnapshot {
@@ -10,7 +18,9 @@ export interface TrafficUiSnapshot {
   readonly tick: number;
   readonly elapsedSeconds: number;
   readonly targetVehicleCount: number;
+  readonly demandMode: TrafficDemandMode;
   readonly metrics: TrafficMetrics;
+  readonly mobilityMetrics?: MobilityRuntimeMetrics;
 }
 
 function readSnapshot(
@@ -22,14 +32,25 @@ function readSnapshot(
     tick: controller.state.tick,
     elapsedSeconds: controller.state.elapsedSeconds,
     targetVehicleCount: controller.state.targetVehicleCount,
+    demandMode: controller.state.demandMode,
     metrics: controller.metrics,
+    mobilityMetrics: controller.mobilityRuntimeMetrics,
   };
 }
 
-export function useTrafficSimulation(world: World) {
+export function useTrafficSimulation(
+  world: World,
+  demandCatalog?: TrafficDemandCatalog,
+) {
   const controller = useMemo(
-    () => new TrafficSimulationController(world),
-    [world],
+    () =>
+      new TrafficSimulationController(
+        world,
+        TRAFFIC_CONFIG.defaultVehicleCount,
+        TRAFFIC_CONFIG,
+        demandCatalog,
+      ),
+    [world, demandCatalog],
   );
   const [snapshot, setSnapshot] = useState<TrafficUiSnapshot>(() =>
     readSnapshot(controller),
@@ -89,6 +110,14 @@ export function useTrafficSimulation(world: World) {
     [controller, publish],
   );
 
+  const setDemandMode = useCallback(
+    (mode: TrafficDemandMode) => {
+      controller.setDemandMode(mode);
+      publish();
+    },
+    [controller, publish],
+  );
+
   return {
     controller,
     snapshot,
@@ -96,5 +125,6 @@ export function useTrafficSimulation(world: World) {
     reset,
     setSpeedMultiplier,
     setTargetVehicleCount,
+    setDemandMode,
   };
 }

@@ -164,6 +164,7 @@ describe('traffic simulation', () => {
     const state: TrafficSimulationState = {
       simulationVersion: TRAFFIC_CONFIG.simulationVersion,
       simulationSeed: 'headway-test',
+      demandMode: 'synthetic',
       tick: 0,
       elapsedSeconds: 0,
       vehicles: [
@@ -174,6 +175,11 @@ describe('traffic simulation', () => {
       nextVehicleSerial: 2,
       completedTrips: 0,
       totalCompletedTravelTime: 0,
+      tripRuntime: [],
+      nextDemandTripIndex: 0,
+      queuedTripIds: [],
+      nextQueuedTripIndex: 0,
+      maximumQueueSize: 0,
     };
 
     const next = stepTrafficSimulation(state, network);

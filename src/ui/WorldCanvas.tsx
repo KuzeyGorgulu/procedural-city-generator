@@ -13,14 +13,17 @@ import {
   type ViewportSize,
 } from '../rendering/viewport';
 import type { Point, World } from '../world/types';
+import type { Vehicle } from '../simulation/traffic/types';
+import type { WellbeingRenderInput } from '../rendering/canvasRenderer';
 
 interface WorldCanvasProps {
   readonly world: World;
   readonly viewMode: WorldViewMode;
   readonly trafficController: TrafficSimulationController;
   readonly population: PopulationState;
+  readonly wellbeing: WellbeingRenderInput;
   readonly selectedVehicleId?: string;
-  readonly onSelectVehicle: (vehicleId?: string) => void;
+  readonly onSelectVehicle: (vehicle?: Vehicle) => void;
 }
 
 const INITIAL_VIEWPORT: ViewportSize = { width: 960, height: 640 };
@@ -30,6 +33,7 @@ export function WorldCanvas({
   viewMode,
   trafficController,
   population,
+  wellbeing,
   selectedVehicleId,
   onSelectVehicle,
 }: WorldCanvasProps) {
@@ -88,6 +92,7 @@ export function WorldCanvas({
           selectedVehicleId,
         },
         population,
+        wellbeing,
       );
     draw();
     return trafficController.subscribe(draw);
@@ -99,6 +104,7 @@ export function WorldCanvas({
     trafficController,
     selectedVehicleId,
     population,
+    wellbeing,
   ]);
 
   useEffect(() => {
@@ -163,15 +169,16 @@ export function WorldCanvas({
         }))
         .filter((entry) => entry.pose !== undefined)
         .map((entry) => ({
-          id: entry.vehicle.id,
+          vehicle: entry.vehicle,
           distance: pointDistance(worldPoint, entry.pose!.position),
         }))
         .filter((entry) => entry.distance <= selectionRadius)
         .sort(
           (first, second) =>
-            first.distance - second.distance || first.id.localeCompare(second.id),
+            first.distance - second.distance ||
+            first.vehicle.id.localeCompare(second.vehicle.id),
         )[0];
-      onSelectVehicle(nearest?.id);
+      onSelectVehicle(nearest?.vehicle);
     }
     dragPositionRef.current = null;
     dragDistanceRef.current = 0;

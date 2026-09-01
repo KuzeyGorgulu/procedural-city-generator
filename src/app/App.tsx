@@ -9,19 +9,88 @@ import { PopulationSummary } from '../ui/PopulationSummary';
 import { getRoadStatistics } from '../world/roadQueries';
 import { getUrbanStatistics } from '../world/urbanQueries';
 import { generatePopulation } from '../population/generatePopulation';
+import { generateMobility } from '../mobility/generateMobility';
+import { createTrafficDemandCatalog } from '../mobility/trafficDemand';
+import { useWellbeing } from './useWellbeing';
+import { WellbeingSummary } from '../ui/WellbeingSummary';
+import {
+  aggregateWellbeingByHomeBuilding,
+  explainCitizenWellbeing,
+} from '../wellbeing/queries';
+import type { WellbeingDimension } from '../wellbeing/types';
 
 export function App() {
   const { seedInput, setSeedInput, world, generate, randomize } = useWorldGeneration();
-  const traffic = useTrafficSimulation(world);
   const population = useMemo(() => generatePopulation(world), [world]);
-  const [viewMode, setViewMode] = useState<WorldViewMode>('population');
-  const [selectedVehicle, setSelectedVehicle] = useState<
-    { readonly simulationSeed: string; readonly vehicleId: string } | undefined
+  const mobility = useMemo(
+    () => generateMobility(world, population),
+    [world, population],
+  );
+  const demandCatalog = useMemo(
+    () => createTrafficDemandCatalog(mobility),
+    [mobility],
+  );
+  const traffic = useTrafficSimulation(world, demandCatalog);
+  const wellbeing = useWellbeing(
+    world,
+    population,
+    mobility,
+    traffic.controller,
+  );
+  const [viewMode, setViewMode] = useState<WorldViewMode>('wellbeing');
+  const [wellbeingDimension, setWellbeingDimension] =
+    useState<WellbeingDimension>('happiness');
+  const [vehicleSelection, setSelectedVehicle] = useState<
+    | {
+        readonly simulationSeed: string;
+        readonly vehicleId: string;
+        readonly citizenId?: string;
+        readonly tripId?: string;
+      }
+    | undefined
   >();
   const selectedVehicleId =
-    selectedVehicle?.simulationSeed === traffic.controller.state.simulationSeed
-      ? selectedVehicle.vehicleId
+    vehicleSelection?.simulationSeed === traffic.controller.state.simulationSeed
+      ? vehicleSelection.vehicleId
       : undefined;
+  const selectedVehicle = selectedVehicleId
+    ? traffic.controller.state.vehicles.find(
+        (vehicle) => vehicle.id === selectedVehicleId,
+      )
+    : undefined;
+  const selectedWellbeing = useMemo(
+    () =>
+      vehicleSelection?.simulationSeed ===
+      traffic.controller.state.simulationSeed
+        ? explainCitizenWellbeing(
+            vehicleSelection.citizenId,
+            wellbeing.state,
+            wellbeing.exposure,
+          )
+        : undefined,
+    [
+      vehicleSelection,
+      traffic.controller,
+      wellbeing.state,
+      wellbeing.exposure,
+    ],
+  );
+  const wellbeingByBuildingId = useMemo(
+    () =>
+      new Map(
+        aggregateWellbeingByHomeBuilding(wellbeing.state, population).map(
+          (summary) => [summary.buildingId, summary],
+        ),
+      ),
+    [wellbeing.state, population],
+  );
+  const wellbeingRenderInput = useMemo(
+    () => ({
+      dimension: wellbeingDimension,
+      byBuildingId: wellbeingByBuildingId,
+    }),
+    [wellbeingDimension, wellbeingByBuildingId],
+  );
   const roadStatistics = useMemo(
     () => getRoadStatistics(world.roads),
     [world.roads],
@@ -35,7 +104,9 @@ export function App() {
     <main className="app-shell">
       <header className="app-header">
         <div>
-          <p className="eyebrow">Phase 6 · Population, Homes &amp; Jobs</p>
+          <p className="eyebrow">
+            Phase 8 &middot; Wellbeing &amp; Environmental Exposure
+          </p>
           <h1>Procedural City Generator</h1>
           <p className="subtitle">A deterministic world, one seed at a time.</p>
         </div>
@@ -51,7 +122,7 @@ export function App() {
       <section className="viewport-panel" aria-labelledby="viewport-title">
         <div className="viewport-toolbar">
           <div>
-            <h2 id="viewport-title">Populated city and traffic</h2>
+            <h2 id="viewport-title">City wellbeing and daily mobility</h2>
             <p>Drag to pan · Scroll to zoom · Click a vehicle for its route</p>
           </div>
           <label className="terrain-view-field">
@@ -63,6 +134,7 @@ export function App() {
               }
               value={viewMode}
             >
+              <option value="wellbeing">Wellbeing</option>
               <option value="population">Population occupancy</option>
               <option value="jobs">Jobs / employment</option>
               <option value="buildings">Buildings</option>
@@ -76,6 +148,25 @@ export function App() {
               <option value="roadGraph">Road graph</option>
             </select>
           </label>
+          {viewMode === 'wellbeing' ? (
+            <label className="terrain-view-field">
+              <span>Metric</span>
+              <select
+                aria-label="Wellbeing map metric"
+                onChange={(event) =>
+                  setWellbeingDimension(
+                    event.target.value as WellbeingDimension,
+                  )
+                }
+                value={wellbeingDimension}
+              >
+                <option value="happiness">Happiness</option>
+                <option value="calm">Calm</option>
+                <option value="stress">Stress</option>
+                <option value="tension">Tension</option>
+              </select>
+            </label>
+          ) : null}
           <dl className="world-stats">
             <div>
               <dt>Blocks</dt>
@@ -100,22 +191,31 @@ export function App() {
           </dl>
         </div>
         <PopulationSummary metrics={population.metrics} />
+        <WellbeingSummary
+          metrics={wellbeing.state.metrics}
+          selected={selectedWellbeing}
+          selectedTripId={vehicleSelection?.tripId}
+          selectedVehicleId={selectedVehicleId}
+        />
         <TrafficControls
+          onDemandModeChange={traffic.setDemandMode}
           onReset={traffic.reset}
           onSpeedChange={traffic.setSpeedMultiplier}
           onTargetVehicleCountChange={traffic.setTargetVehicleCount}
           onToggle={traffic.toggle}
-          selectedVehicleId={selectedVehicleId}
+          selectedVehicle={selectedVehicle}
           snapshot={traffic.snapshot}
         />
         <div className="canvas-frame">
           <WorldCanvas
-            onSelectVehicle={(vehicleId) =>
+            onSelectVehicle={(vehicle) =>
               setSelectedVehicle(
-                vehicleId
+                vehicle
                   ? {
                       simulationSeed: traffic.controller.state.simulationSeed,
-                      vehicleId,
+                      vehicleId: vehicle.id,
+                      citizenId: vehicle.citizenId,
+                      tripId: vehicle.tripId,
                     }
                   : undefined,
               )
@@ -124,6 +224,7 @@ export function App() {
             selectedVehicleId={selectedVehicleId}
             trafficController={traffic.controller}
             viewMode={viewMode}
+            wellbeing={wellbeingRenderInput}
             world={world}
           />
         </div>

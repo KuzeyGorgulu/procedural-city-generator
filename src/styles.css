@@ -259,6 +259,80 @@ h1 {
   border-bottom: 1px solid #243148;
 }
 
+.wellbeing-toolbar {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(280px, 1.15fr);
+  gap: 18px;
+  padding: 10px 18px;
+  background: rgb(11 23 34 / 82%);
+  border-bottom: 1px solid #243148;
+}
+
+.wellbeing-stats,
+.wellbeing-inspector dl {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(68px, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.wellbeing-stats div,
+.wellbeing-inspector dl div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.wellbeing-stats dt,
+.wellbeing-inspector dt {
+  color: #68778c;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.wellbeing-stats dd,
+.wellbeing-inspector dd {
+  overflow: hidden;
+  margin: 0;
+  color: #d6dfe9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wellbeing-inspector {
+  min-width: 0;
+  padding-left: 16px;
+  border-left: 1px solid #2a3a50;
+}
+
+.wellbeing-inspector > p {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: #8493a8;
+  font-size: 0.68rem;
+}
+
+.wellbeing-inspector > p strong {
+  color: #70d9cf;
+  white-space: nowrap;
+}
+
+.wellbeing-inspector > p span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wellbeing-inspector dl {
+  grid-template-columns: repeat(4, minmax(64px, 1fr));
+}
+
 .population-stats {
   display: grid;
   grid-template-columns: repeat(9, minmax(74px, 1fr));
@@ -343,6 +417,11 @@ h1 {
   box-shadow: 0 0 0 3px rgb(88 209 201 / 14%);
 }
 
+.traffic-field select:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .traffic-stats {
   display: flex;
   flex: 1;
@@ -414,6 +493,17 @@ h1 {
   .population-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .wellbeing-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .wellbeing-inspector {
+    padding-top: 10px;
+    padding-left: 0;
+    border-top: 1px solid #2a3a50;
+    border-left: 0;
+  }
 }
 
 @media (max-width: 620px) {
@@ -462,6 +552,14 @@ h1 {
   }
 
   .population-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wellbeing-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .wellbeing-inspector dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

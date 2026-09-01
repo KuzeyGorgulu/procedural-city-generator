@@ -66,7 +66,9 @@ function drawVehicle(
     ? '#f36dff'
     : vehicle.movementState === 'queued'
       ? '#ff8a65'
-      : '#69f3ff';
+      : vehicle.source === 'population'
+        ? '#ffe082'
+        : '#69f3ff';
   context.fill();
   context.strokeStyle = '#071018';
   context.lineWidth = 1.25;

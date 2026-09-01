@@ -9,6 +9,8 @@ export interface TrafficSimulationConfig {
   readonly maxTicksPerAdvance: number;
   readonly defaultVehicleCount: number;
   readonly maxVehicleCount: number;
+  readonly maxPopulationActiveVehicles: number;
+  readonly maxPopulationAdmissionsPerTick: number;
   readonly spawnAttemptLimit: number;
   readonly initialSpawnSerialMultiplier: number;
   readonly minimumTripDistance: number;
@@ -33,6 +35,8 @@ export const TRAFFIC_CONFIG: TrafficSimulationConfig = {
   maxTicksPerAdvance: 40,
   defaultVehicleCount: 24,
   maxVehicleCount: 48,
+  maxPopulationActiveVehicles: 96,
+  maxPopulationAdmissionsPerTick: 4,
   spawnAttemptLimit: 16,
   initialSpawnSerialMultiplier: 5,
   minimumTripDistance: 280,

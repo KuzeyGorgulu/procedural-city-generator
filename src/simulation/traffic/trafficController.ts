@@ -8,10 +8,19 @@ import {
   TRAFFIC_SPEED_MULTIPLIERS,
 } from './config';
 import { createInitialTrafficState, setTrafficTargetVehicleCount } from './spawning';
+import {
+  buildTrafficDemandIndex,
+  createPopulationTrafficState,
+  getMobilityRuntimeMetrics,
+} from './populationDemand';
 import { getTrafficMetrics } from './trafficMetrics';
 import { stepTrafficSimulation } from './trafficSimulation';
 import { buildTrafficNetwork } from './trafficNetwork';
 import type {
+  MobilityRuntimeMetrics,
+  TrafficDemandCatalog,
+  TrafficDemandIndex,
+  TrafficDemandMode,
   TrafficMetrics,
   TrafficNetwork,
   TrafficSimulationState,
@@ -23,6 +32,8 @@ export class TrafficSimulationController {
   readonly world: World;
   readonly network: TrafficNetwork;
   readonly config: TrafficSimulationConfig;
+  readonly demandIndex?: TrafficDemandIndex;
+  #syntheticTargetVehicleCount: number;
   #state: TrafficSimulationState;
   #accumulatorSeconds = 0;
   #playing = false;
@@ -33,10 +44,15 @@ export class TrafficSimulationController {
     world: World,
     targetVehicleCount = TRAFFIC_CONFIG.defaultVehicleCount,
     config: TrafficSimulationConfig = TRAFFIC_CONFIG,
+    demandCatalog?: TrafficDemandCatalog,
   ) {
     this.world = world;
     this.config = config;
     this.network = buildTrafficNetwork(world, config);
+    this.demandIndex = demandCatalog
+      ? buildTrafficDemandIndex(demandCatalog)
+      : undefined;
+    this.#syntheticTargetVehicleCount = targetVehicleCount;
     this.#state = createInitialTrafficState(
       world,
       this.network,
@@ -59,6 +75,12 @@ export class TrafficSimulationController {
 
   get metrics(): TrafficMetrics {
     return getTrafficMetrics(this.#state, this.network);
+  }
+
+  get mobilityRuntimeMetrics(): MobilityRuntimeMetrics | undefined {
+    return this.demandIndex
+      ? getMobilityRuntimeMetrics(this.#state, this.demandIndex)
+      : undefined;
   }
 
   subscribe(listener: TrafficListener): () => void {
@@ -86,12 +108,7 @@ export class TrafficSimulationController {
   reset(): void {
     this.#playing = false;
     this.#accumulatorSeconds = 0;
-    this.#state = createInitialTrafficState(
-      this.world,
-      this.network,
-      this.#state.targetVehicleCount,
-      this.config,
-    );
+    this.#state = this.#createStateForMode(this.#state.demandMode);
     this.#notify();
   }
 
@@ -102,12 +119,23 @@ export class TrafficSimulationController {
   }
 
   setTargetVehicleCount(count: number): void {
+    if (this.#state.demandMode !== 'synthetic') return;
     this.#state = setTrafficTargetVehicleCount(
       this.#state,
       this.network,
       count,
       this.config,
     );
+    this.#syntheticTargetVehicleCount = this.#state.targetVehicleCount;
+    this.#notify();
+  }
+
+  setDemandMode(mode: TrafficDemandMode): void {
+    if (mode !== 'synthetic' && !this.demandIndex) return;
+    if (mode === this.#state.demandMode) return;
+    this.#playing = false;
+    this.#accumulatorSeconds = 0;
+    this.#state = this.#createStateForMode(mode);
     this.#notify();
   }
 
@@ -130,6 +158,7 @@ export class TrafficSimulationController {
         this.#state,
         this.network,
         this.config,
+        this.demandIndex,
       );
     }
     if (tickCount > 0) {
@@ -142,5 +171,22 @@ export class TrafficSimulationController {
 
   #notify(): void {
     for (const listener of this.#listeners) listener();
+  }
+
+  #createStateForMode(mode: TrafficDemandMode): TrafficSimulationState {
+    if (mode !== 'synthetic' && this.demandIndex) {
+      return createPopulationTrafficState(
+        this.world,
+        this.demandIndex,
+        mode,
+        this.config,
+      );
+    }
+    return createInitialTrafficState(
+      this.world,
+      this.network,
+      this.#syntheticTargetVehicleCount,
+      this.config,
+    );
   }
 }

@@ -4,11 +4,16 @@ import {
   type TrafficSpeedMultiplier,
 } from '../simulation/traffic/config';
 import type { TrafficUiSnapshot } from '../app/useTrafficSimulation';
+import type {
+  TrafficDemandMode,
+  Vehicle,
+} from '../simulation/traffic/types';
 
 interface TrafficControlsProps {
-  readonly selectedVehicleId?: string;
+  readonly selectedVehicle?: Vehicle;
   readonly snapshot: TrafficUiSnapshot;
   readonly onReset: () => void;
+  readonly onDemandModeChange: (mode: TrafficDemandMode) => void;
   readonly onSpeedChange: (multiplier: TrafficSpeedMultiplier) => void;
   readonly onTargetVehicleCountChange: (count: number) => void;
   readonly onToggle: () => void;
@@ -21,9 +26,10 @@ function formatSimulationTime(seconds: number): string {
 }
 
 export function TrafficControls({
-  selectedVehicleId,
+  selectedVehicle,
   snapshot,
   onReset,
+  onDemandModeChange,
   onSpeedChange,
   onTargetVehicleCountChange,
   onToggle,
@@ -38,6 +44,20 @@ export function TrafficControls({
           Reset
         </button>
       </div>
+      <label className="traffic-field">
+        <span>Demand</span>
+        <select
+          aria-label="Traffic demand mode"
+          onChange={(event) =>
+            onDemandModeChange(event.target.value as TrafficDemandMode)
+          }
+          value={snapshot.demandMode}
+        >
+          <option value="synthetic">Synthetic</option>
+          <option value="morning-commute">Morning commute</option>
+          <option value="evening-commute">Evening commute</option>
+        </select>
+      </label>
       <label className="traffic-field">
         <span>Speed</span>
         <select
@@ -58,6 +78,7 @@ export function TrafficControls({
         <span>Traffic</span>
         <select
           aria-label="Target vehicle count"
+          disabled={snapshot.demandMode !== 'synthetic'}
           onChange={(event) =>
             onTargetVehicleCountChange(Number(event.target.value))
           }
@@ -83,14 +104,64 @@ export function TrafficControls({
           <dt>Completed</dt>
           <dd>{snapshot.metrics.completedTrips}</dd>
         </div>
+        {snapshot.mobilityMetrics && snapshot.demandMode !== 'synthetic' ? (
+          <>
+            <div>
+              <dt>Commuters</dt>
+              <dd>{snapshot.mobilityMetrics.employedCommuters}</dd>
+            </div>
+            <div>
+              <dt>Planned</dt>
+              <dd>{snapshot.mobilityMetrics.plannedCommuteTrips}</dd>
+            </div>
+            <div>
+              <dt>Queued</dt>
+              <dd>{snapshot.mobilityMetrics.queuedTrips}</dd>
+            </div>
+            <div>
+              <dt>Unreachable</dt>
+              <dd>{snapshot.mobilityMetrics.unreachableTrips}</dd>
+            </div>
+            <div>
+              <dt>Max queue</dt>
+              <dd>{snapshot.mobilityMetrics.maximumQueueSize}</dd>
+            </div>
+            <div>
+              <dt>Avg estimate</dt>
+              <dd>
+                {snapshot.mobilityMetrics.averageEstimatedTravelTime.toFixed(1)}s
+              </dd>
+            </div>
+          </>
+        ) : null}
         <div>
           <dt>Avg speed</dt>
           <dd>{snapshot.metrics.averageCurrentSpeed.toFixed(1)}</dd>
         </div>
         <div>
           <dt>Selected</dt>
-          <dd title={selectedVehicleId}>{selectedVehicleId ?? 'Click a vehicle'}</dd>
+          <dd title={selectedVehicle?.id}>
+            {selectedVehicle?.id ?? 'Click a vehicle'}
+          </dd>
         </div>
+        {selectedVehicle ? (
+          <div>
+            <dt>Source</dt>
+            <dd>{selectedVehicle.source}</dd>
+          </div>
+        ) : null}
+        {selectedVehicle?.citizenId ? (
+          <div>
+            <dt>Citizen</dt>
+            <dd title={selectedVehicle.citizenId}>{selectedVehicle.citizenId}</dd>
+          </div>
+        ) : null}
+        {selectedVehicle?.tripPurpose ? (
+          <div>
+            <dt>Trip</dt>
+            <dd title={selectedVehicle.tripId}>{selectedVehicle.tripPurpose}</dd>
+          </div>
+        ) : null}
       </dl>
     </section>
   );

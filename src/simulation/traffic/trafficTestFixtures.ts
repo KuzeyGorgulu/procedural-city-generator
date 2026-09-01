@@ -95,6 +95,7 @@ export function createVehicleForRoute(
 ): Vehicle {
   return {
     id,
+    source: 'synthetic',
     originNodeId: route.originNodeId,
     destinationNodeId: route.destinationNodeId,
     route,

@@ -5,8 +5,10 @@ import { TRAFFIC_CONFIG } from './config';
 import { findTrafficRoute } from './routing';
 import type {
   TrafficNetwork,
+  TrafficRoute,
   TrafficSimulationState,
   Vehicle,
+  VehicleProvenance,
 } from './types';
 
 const TRAFFIC_SEED_SEPARATOR = '\u001e';
@@ -32,7 +34,7 @@ function normalizeVehicleCount(
   );
 }
 
-function hasSpawnClearance(
+export function hasSpawnClearance(
   routeFirstArcId: string,
   originNodeId: string,
   vehicles: readonly Vehicle[],
@@ -45,6 +47,31 @@ function hasSpawnClearance(
       (vehicle.route.arcIds[vehicle.routeArcIndex] === routeFirstArcId &&
         vehicle.progressOnArc < config.minimumFollowingDistance * 1.5),
   );
+}
+
+export function createVehicleForRoute(
+  id: string,
+  route: TrafficRoute,
+  network: TrafficNetwork,
+  provenance: VehicleProvenance,
+): Vehicle | undefined {
+  const firstArcId = route.arcIds[0];
+  const firstArc = firstArcId ? network.arcsById.get(firstArcId) : undefined;
+  if (!firstArc) return undefined;
+  return {
+    id,
+    ...provenance,
+    originNodeId: route.originNodeId,
+    destinationNodeId: route.destinationNodeId,
+    route,
+    routeArcIndex: 0,
+    progressOnArc: 0,
+    currentSpeed: 0,
+    desiredSpeed: firstArc.nominalSpeed,
+    movementState: 'moving',
+    elapsedTripSeconds: 0,
+    distanceTravelled: 0,
+  };
 }
 
 function createVehicle(
@@ -77,22 +104,13 @@ function createVehicle(
     ) {
       continue;
     }
-    const firstArc = network.arcsById.get(firstArcId);
-    if (!firstArc) continue;
-
-    return {
-      id: `vehicle-${serial.toString().padStart(5, '0')}`,
-      originNodeId,
-      destinationNodeId,
+    const vehicle = createVehicleForRoute(
+      `vehicle-${serial.toString().padStart(5, '0')}`,
       route,
-      routeArcIndex: 0,
-      progressOnArc: 0,
-      currentSpeed: 0,
-      desiredSpeed: firstArc.nominalSpeed,
-      movementState: 'moving',
-      elapsedTripSeconds: 0,
-      distanceTravelled: 0,
-    };
+      network,
+      { source: 'synthetic' },
+    );
+    if (vehicle) return vehicle;
   }
 
   return undefined;
@@ -149,6 +167,7 @@ export function createInitialTrafficState(
   const state: TrafficSimulationState = {
     simulationVersion: config.simulationVersion,
     simulationSeed: deriveTrafficSimulationSeed(world, config),
+    demandMode: 'synthetic',
     tick: 0,
     elapsedSeconds: 0,
     vehicles: [],
@@ -156,6 +175,11 @@ export function createInitialTrafficState(
     nextVehicleSerial: 0,
     completedTrips: 0,
     totalCompletedTravelTime: 0,
+    tripRuntime: [],
+    nextDemandTripIndex: 0,
+    queuedTripIds: [],
+    nextQueuedTripIndex: 0,
+    maximumQueueSize: 0,
   };
   return fillTrafficPopulation(state, network, config);
 }

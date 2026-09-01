@@ -7,6 +7,10 @@ import type {
   World,
 } from '../world/types';
 import type { PopulationState } from '../population/types';
+import type {
+  BuildingWellbeingSummary,
+  WellbeingDimension,
+} from '../wellbeing/types';
 import type { Camera, ViewportSize } from './viewport';
 import { drawTraffic, type TrafficRenderInput } from './trafficRenderer';
 import {
@@ -16,6 +20,7 @@ import {
 import { screenToWorld, worldToScreen } from './viewport';
 
 export type WorldViewMode =
+  | 'wellbeing'
   | 'population'
   | 'jobs'
   | 'buildings'
@@ -54,6 +59,11 @@ const BUILDING_COLORS = {
   'mixed-use': '#efa38b',
   civic: '#8fd0eb',
 } as const;
+
+export interface WellbeingRenderInput {
+  readonly dimension: WellbeingDimension;
+  readonly byBuildingId: ReadonlyMap<string, BuildingWellbeingSummary>;
+}
 
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
@@ -383,6 +393,42 @@ function drawPopulationLayer(
   context.restore();
 }
 
+function wellbeingColor(
+  score: number,
+  dimension: WellbeingDimension,
+): string {
+  const favorable = dimension === 'calm' || dimension === 'happiness';
+  const amount = favorable ? clamp01(score / 100) : clamp01(1 - score / 100);
+  return colorToCss(mixColor([204, 74, 83], [74, 198, 148], amount));
+}
+
+function drawWellbeingLayer(
+  context: CanvasRenderingContext2D,
+  urban: UrbanStructure,
+  wellbeing: WellbeingRenderInput,
+  camera: Camera,
+  viewport: ViewportSize,
+): void {
+  drawZoning(context, urban, camera, viewport, false, 0.1);
+  context.save();
+  for (const building of urban.buildings) {
+    const summary = wellbeing.byBuildingId.get(building.id);
+    context.beginPath();
+    tracePolygon(context, building.footprint, camera, viewport);
+    context.fillStyle = summary
+      ? wellbeingColor(
+          summary.averageScores[wellbeing.dimension],
+          wellbeing.dimension,
+        )
+      : 'rgba(72, 81, 94, 0.42)';
+    context.fill();
+    context.strokeStyle = summary ? '#e8eef5' : '#26313e';
+    context.lineWidth = summary ? 1 : 0.65;
+    context.stroke();
+  }
+  context.restore();
+}
+
 function strokeRoadType(
   context: CanvasRenderingContext2D,
   graph: RoadGraph,
@@ -484,6 +530,7 @@ export function renderWorld(
   mode: WorldViewMode,
   traffic?: TrafficRenderInput,
   population?: PopulationState,
+  wellbeing?: WellbeingRenderInput,
 ): void {
   context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   context.clearRect(0, 0, viewport.width, viewport.height);
@@ -498,6 +545,7 @@ export function renderWorld(
     mode === 'zoning' ||
     mode === 'buildings' ||
     mode === 'suitability' ||
+    mode === 'wellbeing' ||
     mode === 'population' ||
     mode === 'jobs'
   ) {
@@ -525,6 +573,8 @@ export function renderWorld(
     drawZoning(context, world.urban, camera, viewport, true);
   } else if (mode === 'buildings') {
     drawBuildings(context, world.urban, camera, viewport);
+  } else if (mode === 'wellbeing' && wellbeing) {
+    drawWellbeingLayer(context, world.urban, wellbeing, camera, viewport);
   } else if ((mode === 'population' || mode === 'jobs') && population) {
     drawPopulationLayer(
       context,

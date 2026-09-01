@@ -2,7 +2,12 @@ import type { RoadNodeId } from '../../world/types';
 import type { TrafficSimulationConfig } from './config';
 import { TRAFFIC_CONFIG } from './config';
 import { fillTrafficPopulation } from './spawning';
+import { advancePopulationTrafficDemand } from './populationDemand';
 import type {
+  CompletedPopulationTrip,
+} from './populationDemand';
+import type {
+  TrafficDemandIndex,
   TrafficNetwork,
   TrafficSimulationState,
   Vehicle,
@@ -232,6 +237,7 @@ export function stepTrafficSimulation(
   state: TrafficSimulationState,
   network: TrafficNetwork,
   config: TrafficSimulationConfig = TRAFFIC_CONFIG,
+  demandIndex?: TrafficDemandIndex,
 ): TrafficSimulationState {
   const deltaSeconds = config.fixedTimeStepSeconds;
   const vehiclesByArc = buildVehiclesByArc(state.vehicles);
@@ -274,6 +280,7 @@ export function stepTrafficSimulation(
   const nextVehicles: Vehicle[] = [];
   let completedTrips = state.completedTrips;
   let totalCompletedTravelTime = state.totalCompletedTravelTime;
+  const completedPopulationTrips: CompletedPopulationTrip[] = [];
   for (const proposal of proposals) {
     const queued =
       proposal.request !== undefined && !winners.has(proposal.vehicle.id);
@@ -291,22 +298,36 @@ export function stepTrafficSimulation(
     if (result.completed) {
       completedTrips += 1;
       totalCompletedTravelTime += result.completedTravelTime;
+      if (proposal.vehicle.source === 'population' && proposal.vehicle.tripId) {
+        completedPopulationTrips.push({
+          tripId: proposal.vehicle.tripId,
+          travelTime: result.completedTravelTime,
+        });
+      }
     } else if (result.vehicle) {
       nextVehicles.push(result.vehicle);
     }
   }
   nextVehicles.sort((first, second) => first.id.localeCompare(second.id));
 
-  return fillTrafficPopulation(
-    {
-      ...state,
-      tick: state.tick + 1,
-      elapsedSeconds: state.elapsedSeconds + deltaSeconds,
-      vehicles: nextVehicles,
-      completedTrips,
-      totalCompletedTravelTime,
-    },
-    network,
-    config,
-  );
+  const advancedState: TrafficSimulationState = {
+    ...state,
+    tick: state.tick + 1,
+    elapsedSeconds: state.elapsedSeconds + deltaSeconds,
+    vehicles: nextVehicles,
+    completedTrips,
+    totalCompletedTravelTime,
+  };
+  if (state.demandMode === 'synthetic') {
+    return fillTrafficPopulation(advancedState, network, config);
+  }
+  return demandIndex
+    ? advancePopulationTrafficDemand(
+        advancedState,
+        network,
+        demandIndex,
+        completedPopulationTrips,
+        config,
+      )
+    : advancedState;
 }
