@@ -3,9 +3,11 @@ import type {
   WellbeingMetrics,
   WellbeingScores,
 } from '../wellbeing/types';
+import type { CommuteBehaviorExplanation } from '../behavior/types';
 
 interface WellbeingSummaryProps {
   readonly metrics: WellbeingMetrics;
+  readonly selectedBehavior?: CommuteBehaviorExplanation;
   readonly selected?: WellbeingExplanation;
   readonly selectedTripId?: string;
   readonly selectedVehicleId?: string;
@@ -13,6 +15,13 @@ interface WellbeingSummaryProps {
 
 function formatScore(score: number): string {
   return score.toFixed(1);
+}
+
+function formatMinute(minute: number): string {
+  const bounded = Math.min(1_439, Math.max(0, Math.round(minute)));
+  return `${Math.floor(bounded / 60)
+    .toString()
+    .padStart(2, '0')}:${(bounded % 60).toString().padStart(2, '0')}`;
 }
 
 function ScoreSummary({ scores }: { readonly scores: WellbeingScores }) {
@@ -41,6 +50,7 @@ function ScoreSummary({ scores }: { readonly scores: WellbeingScores }) {
 export function WellbeingSummary({
   metrics,
   selected,
+  selectedBehavior,
   selectedTripId,
   selectedVehicleId,
 }: WellbeingSummaryProps) {
@@ -154,6 +164,73 @@ export function WellbeingSummary({
                     <dt>Applied commutes</dt>
                     <dd>{selected.citizen.processedCommuteCount}</dd>
                   </div>
+                </>
+              ) : null}
+              {selectedBehavior ? (
+                <>
+                  <div>
+                    <dt>Commute round</dt>
+                    <dd>{selectedBehavior.currentRound}</dd>
+                  </div>
+                  <div>
+                    <dt>Planned / effective</dt>
+                    <dd>
+                      {formatMinute(selectedBehavior.plannedDepartureMinute)} /{' '}
+                      {formatMinute(selectedBehavior.effectiveDepartureMinute)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Current / next shift</dt>
+                    <dd>
+                      {selectedBehavior.behavior.departureOffsetMinutes} /{' '}
+                      {selectedBehavior.behavior.nextDepartureOffsetMinutes} min
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Next effective</dt>
+                    <dd>
+                      {formatMinute(selectedBehavior.nextEffectiveDepartureMinute)}
+                    </dd>
+                  </div>
+                  {selectedBehavior.behavior.lastDecision ? (
+                    <>
+                      <div>
+                        <dt>Adapt pressure</dt>
+                        <dd>
+                          {(
+                            selectedBehavior.behavior.lastDecision
+                              .adaptationPressure * 100
+                          ).toFixed(1)}%
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Delay / queue signal</dt>
+                        <dd>
+                          {(
+                            selectedBehavior.behavior.lastDecision
+                              .contributions.unexpectedDelay * 100
+                          ).toFixed(1)} /{' '}
+                          {(
+                            selectedBehavior.behavior.lastDecision
+                              .contributions.queueFriction * 100
+                          ).toFixed(1)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Tension / stress signal</dt>
+                        <dd>
+                          {(
+                            selectedBehavior.behavior.lastDecision
+                              .contributions.tension * 100
+                          ).toFixed(1)} /{' '}
+                          {(
+                            selectedBehavior.behavior.lastDecision
+                              .contributions.stress * 100
+                          ).toFixed(1)}
+                        </dd>
+                      </div>
+                    </>
+                  ) : null}
                 </>
               ) : null}
             </dl>

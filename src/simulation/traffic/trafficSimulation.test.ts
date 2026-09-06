@@ -196,7 +196,7 @@ describe('traffic simulation', () => {
     const westRoute = findTrafficRoute(network, 'west', 'east')!;
     const northRoute = findTrafficRoute(network, 'north', 'south')!;
     const state = createInitialTrafficState(world, network, 0);
-    const next = stepTrafficSimulation(
+    const stopped = stepTrafficSimulation(
       {
         ...state,
         vehicles: [
@@ -207,6 +207,11 @@ describe('traffic simulation', () => {
       },
       network,
     );
+    expect(stopped.vehicles.every((vehicle) => vehicle.movementState === 'queued')).toBe(
+      true,
+    );
+    expect(stopped.consecutiveStoppedTicks).toBe(1);
+    const next = stepTrafficSimulation(stopped, network);
 
     expect(next.vehicles.find(({ id }) => id === 'vehicle-00000')?.movementState).toBe(
       'moving',
@@ -214,5 +219,68 @@ describe('traffic simulation', () => {
     expect(next.vehicles.find(({ id }) => id === 'vehicle-00001')?.movementState).toBe(
       'queued',
     );
+  });
+
+  it('breaks a closed all-stop intersection cycle by stable vehicle ID', () => {
+    const base = createCrossRoadWorld();
+    const world = {
+      ...base,
+      roads: {
+        nodes: [
+          { id: 'a', position: { x: 50, y: 50 } },
+          { id: 'b', position: { x: 53, y: 50 } },
+          { id: 'c', position: { x: 51.5, y: 52.6 } },
+          { id: 'a-spoke', position: { x: 40, y: 50 } },
+          { id: 'b-spoke', position: { x: 63, y: 50 } },
+          { id: 'c-spoke', position: { x: 51.5, y: 62.6 } },
+        ],
+        edges: [
+          { id: 'edge-ab', from: 'a', to: 'b', type: 'secondary' as const, length: 3 },
+          { id: 'edge-bc', from: 'b', to: 'c', type: 'secondary' as const, length: 3 },
+          { id: 'edge-ca', from: 'c', to: 'a', type: 'secondary' as const, length: 3 },
+          { id: 'edge-a-spoke', from: 'a', to: 'a-spoke', type: 'secondary' as const, length: 10 },
+          { id: 'edge-b-spoke', from: 'b', to: 'b-spoke', type: 'secondary' as const, length: 10 },
+          { id: 'edge-c-spoke', from: 'c', to: 'c-spoke', type: 'secondary' as const, length: 10 },
+        ],
+      },
+    };
+    const network = buildTrafficNetwork(world);
+    const route = (originNodeId: string, destinationNodeId: string, arcIds: readonly string[]) => ({
+      originNodeId,
+      destinationNodeId,
+      arcIds,
+      totalLength: 6,
+      estimatedTravelTime: 6 / 38,
+    });
+    const state = createInitialTrafficState(world, network, 0);
+    const next = stepTrafficSimulation(
+      {
+        ...state,
+        vehicles: [
+          createVehicleForRoute(
+            'vehicle-00000',
+            route('a', 'c', ['edge-ab:forward', 'edge-bc:forward']),
+            0,
+          ),
+          createVehicleForRoute(
+            'vehicle-00001',
+            route('b', 'a', ['edge-bc:forward', 'edge-ca:forward']),
+            0,
+          ),
+          createVehicleForRoute(
+            'vehicle-00002',
+            route('c', 'b', ['edge-ca:forward', 'edge-ab:forward']),
+            0,
+          ),
+        ],
+        nextVehicleSerial: 3,
+      },
+      network,
+    );
+
+    expect(next.vehicles.find(({ id }) => id === 'vehicle-00000')?.movementState).toBe(
+      'moving',
+    );
+    expect(next.vehicles.filter((vehicle) => vehicle.movementState === 'queued')).toHaveLength(2);
   });
 });

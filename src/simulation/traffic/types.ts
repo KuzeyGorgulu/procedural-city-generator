@@ -88,7 +88,10 @@ export interface TrafficDemandTrip {
   readonly purpose: PopulationTripPurpose;
   readonly originBuildingId: string;
   readonly destinationBuildingId: string;
+  /** Immutable Phase 7 intent retained for inspection. */
   readonly plannedDepartureMinute: number;
+  /** Frozen minute consumed by the current traffic-demand round. */
+  readonly effectiveDepartureMinute: number;
   readonly route: TrafficRoute;
 }
 
@@ -97,6 +100,7 @@ export interface UnreachableTrafficDemand {
   readonly citizenId: string;
   readonly purpose: PopulationTripPurpose;
   readonly plannedDepartureMinute: number;
+  readonly effectiveDepartureMinute: number;
 }
 
 /** Plain immutable adapter from mobility plans into the traffic kernel. */
@@ -155,6 +159,8 @@ export interface TrafficSimulationState {
   readonly queuedTripIds: readonly string[];
   readonly nextQueuedTripIndex: number;
   readonly maximumQueueSize: number;
+  /** Consecutive active ticks in which no vehicle advanced along its route. */
+  readonly consecutiveStoppedTicks?: number;
 }
 
 export interface SegmentOccupancy {

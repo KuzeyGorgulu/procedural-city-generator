@@ -41,7 +41,7 @@ export function TrafficControls({
           {snapshot.isPlaying ? 'Pause traffic' : 'Play traffic'}
         </button>
         <button className="secondary-button" onClick={onReset} type="button">
-          Reset
+          Reset current run
         </button>
       </div>
       <label className="traffic-field">

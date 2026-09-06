@@ -32,7 +32,7 @@ export class TrafficSimulationController {
   readonly world: World;
   readonly network: TrafficNetwork;
   readonly config: TrafficSimulationConfig;
-  readonly demandIndex?: TrafficDemandIndex;
+  #demandIndex?: TrafficDemandIndex;
   #syntheticTargetVehicleCount: number;
   #state: TrafficSimulationState;
   #accumulatorSeconds = 0;
@@ -49,7 +49,7 @@ export class TrafficSimulationController {
     this.world = world;
     this.config = config;
     this.network = buildTrafficNetwork(world, config);
-    this.demandIndex = demandCatalog
+    this.#demandIndex = demandCatalog
       ? buildTrafficDemandIndex(demandCatalog)
       : undefined;
     this.#syntheticTargetVehicleCount = targetVehicleCount;
@@ -78,9 +78,13 @@ export class TrafficSimulationController {
   }
 
   get mobilityRuntimeMetrics(): MobilityRuntimeMetrics | undefined {
-    return this.demandIndex
-      ? getMobilityRuntimeMetrics(this.#state, this.demandIndex)
+    return this.#demandIndex
+      ? getMobilityRuntimeMetrics(this.#state, this.#demandIndex)
       : undefined;
+  }
+
+  get demandIndex(): TrafficDemandIndex | undefined {
+    return this.#demandIndex;
   }
 
   subscribe(listener: TrafficListener): () => void {
@@ -130,8 +134,19 @@ export class TrafficSimulationController {
     this.#notify();
   }
 
+  /** Replaces only the frozen demand adapter; the road/movement kernel stays intact. */
+  setDemandCatalog(catalog: TrafficDemandCatalog): void {
+    this.#demandIndex = buildTrafficDemandIndex(catalog);
+    if (this.#state.demandMode !== 'synthetic') {
+      this.#playing = false;
+      this.#accumulatorSeconds = 0;
+      this.#state = this.#createStateForMode(this.#state.demandMode);
+    }
+    this.#notify();
+  }
+
   setDemandMode(mode: TrafficDemandMode): void {
-    if (mode !== 'synthetic' && !this.demandIndex) return;
+    if (mode !== 'synthetic' && !this.#demandIndex) return;
     if (mode === this.#state.demandMode) return;
     this.#playing = false;
     this.#accumulatorSeconds = 0;
@@ -158,7 +173,7 @@ export class TrafficSimulationController {
         this.#state,
         this.network,
         this.config,
-        this.demandIndex,
+        this.#demandIndex,
       );
     }
     if (tickCount > 0) {
@@ -174,10 +189,10 @@ export class TrafficSimulationController {
   }
 
   #createStateForMode(mode: TrafficDemandMode): TrafficSimulationState {
-    if (mode !== 'synthetic' && this.demandIndex) {
+    if (mode !== 'synthetic' && this.#demandIndex) {
       return createPopulationTrafficState(
         this.world,
-        this.demandIndex,
+        this.#demandIndex,
         mode,
         this.config,
       );

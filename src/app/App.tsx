@@ -10,7 +10,6 @@ import { getRoadStatistics } from '../world/roadQueries';
 import { getUrbanStatistics } from '../world/urbanQueries';
 import { generatePopulation } from '../population/generatePopulation';
 import { generateMobility } from '../mobility/generateMobility';
-import { createTrafficDemandCatalog } from '../mobility/trafficDemand';
 import { useWellbeing } from './useWellbeing';
 import { WellbeingSummary } from '../ui/WellbeingSummary';
 import {
@@ -18,6 +17,14 @@ import {
   explainCitizenWellbeing,
 } from '../wellbeing/queries';
 import type { WellbeingDimension } from '../wellbeing/types';
+import {
+  useBehaviorFeedback,
+  useCommuteBehavior,
+} from './useCommuteBehavior';
+import { getDemandModePurpose } from '../simulation/traffic/populationDemand';
+import { calculateBehaviorMetrics } from '../behavior/metrics';
+import { explainCommuteBehavior } from '../behavior/queries';
+import { BehaviorControls } from '../ui/BehaviorControls';
 import { ProductSignature } from '../ui/ProductSignature';
 
 export function App() {
@@ -27,16 +34,20 @@ export function App() {
     () => generateMobility(world, population),
     [world, population],
   );
-  const demandCatalog = useMemo(
-    () => createTrafficDemandCatalog(mobility),
-    [mobility],
-  );
-  const traffic = useTrafficSimulation(world, demandCatalog);
+  const behavior = useCommuteBehavior(mobility);
+  const traffic = useTrafficSimulation(world, behavior.demandCatalog);
   const wellbeing = useWellbeing(
     world,
     population,
     mobility,
     traffic.controller,
+  );
+  useBehaviorFeedback(
+    mobility,
+    traffic.controller,
+    wellbeing.state,
+    behavior.state,
+    behavior.applyEvents,
   );
   const [viewMode, setViewMode] = useState<WorldViewMode>('wellbeing');
   const [wellbeingDimension, setWellbeingDimension] =
@@ -76,6 +87,44 @@ export function App() {
       wellbeing.exposure,
     ],
   );
+  const selectedTrip = useMemo(
+    () =>
+      mobility.commuteTrips.find(
+        (trip) => trip.id === vehicleSelection?.tripId,
+      ),
+    [mobility, vehicleSelection?.tripId],
+  );
+  const selectedBehavior = useMemo(
+    () =>
+      explainCommuteBehavior(
+        behavior.state,
+        vehicleSelection?.citizenId,
+        selectedTrip?.purpose,
+        selectedTrip?.plannedDepartureMinute,
+      ),
+    [
+      behavior.state,
+      selectedTrip,
+      vehicleSelection?.citizenId,
+    ],
+  );
+  const activeCommutePurpose = getDemandModePurpose(traffic.snapshot.demandMode);
+  const behaviorMetrics = useMemo(
+    () =>
+      activeCommutePurpose
+        ? calculateBehaviorMetrics(behavior.state, activeCommutePurpose)
+        : undefined,
+    [activeCommutePurpose, behavior.state],
+  );
+  const roundComplete =
+    traffic.snapshot.demandMode !== 'synthetic' &&
+    traffic.controller.state.tripRuntime.every(
+      (runtime) =>
+        runtime.status === 'completed' || runtime.status === 'unreachable',
+    ) &&
+    (!behavior.state.behaviorEnabled ||
+      (behaviorMetrics?.processedCommuteCount ?? 0) >=
+        (traffic.snapshot.mobilityMetrics?.completedTrips ?? 0));
   const wellbeingByBuildingId = useMemo(
     () =>
       new Map(
@@ -106,7 +155,7 @@ export function App() {
       <header className="app-header">
         <div>
           <p className="eyebrow">
-            Phase 8 &middot; Wellbeing &amp; Environmental Exposure
+            Phase 9 &middot; Adaptive Commute Behavior
           </p>
           <h1>Procedural City Generator</h1>
           <p className="subtitle">A deterministic world, one seed at a time.</p>
@@ -194,6 +243,7 @@ export function App() {
         <PopulationSummary metrics={population.metrics} />
         <WellbeingSummary
           metrics={wellbeing.state.metrics}
+          selectedBehavior={selectedBehavior}
           selected={selectedWellbeing}
           selectedTripId={vehicleSelection?.tripId}
           selectedVehicleId={selectedVehicleId}
@@ -206,6 +256,19 @@ export function App() {
           onToggle={traffic.toggle}
           selectedVehicle={selectedVehicle}
           snapshot={traffic.snapshot}
+        />
+        <BehaviorControls
+          activePurpose={activeCommutePurpose}
+          metrics={behaviorMetrics}
+          onAdvanceRound={() => {
+            if (activeCommutePurpose && roundComplete) {
+              behavior.advanceRound(activeCommutePurpose);
+            }
+          }}
+          onBehaviorEnabledChange={behavior.setBehaviorEnabled}
+          onResetBehavior={behavior.resetBehavior}
+          roundComplete={roundComplete}
+          state={behavior.state}
         />
         <div className="canvas-frame">
           <WorldCanvas

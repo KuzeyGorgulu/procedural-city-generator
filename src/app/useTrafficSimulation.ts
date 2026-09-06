@@ -48,13 +48,18 @@ export function useTrafficSimulation(
         world,
         TRAFFIC_CONFIG.defaultVehicleCount,
         TRAFFIC_CONFIG,
-        demandCatalog,
       ),
-    [world, demandCatalog],
+    [world],
   );
   const [snapshot, setSnapshot] = useState<TrafficUiSnapshot>(() =>
     readSnapshot(controller),
   );
+
+  useEffect(() => {
+    if (!demandCatalog) return;
+    controller.setDemandCatalog(demandCatalog);
+    setSnapshot(readSnapshot(controller));
+  }, [controller, demandCatalog]);
 
   useEffect(() => {
     let frameId = 0;

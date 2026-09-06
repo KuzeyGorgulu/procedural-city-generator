@@ -22,11 +22,11 @@ export interface CompletedPopulationTrip {
 }
 
 function compareDemandTrips(
-  first: { readonly plannedDepartureMinute: number; readonly id: string },
-  second: { readonly plannedDepartureMinute: number; readonly id: string },
+  first: { readonly effectiveDepartureMinute: number; readonly id: string },
+  second: { readonly effectiveDepartureMinute: number; readonly id: string },
 ): number {
   return (
-    first.plannedDepartureMinute - second.plannedDepartureMinute ||
+    first.effectiveDepartureMinute - second.effectiveDepartureMinute ||
     first.id.localeCompare(second.id)
   );
 }
@@ -36,11 +36,11 @@ function getWavePurpose(mode: TrafficDemandMode): PopulationTripPurpose {
 }
 
 function getStartMinute(
-  trips: readonly { readonly plannedDepartureMinute: number }[],
+  trips: readonly { readonly effectiveDepartureMinute: number }[],
 ): number {
   return trips.length === 0
     ? 0
-    : Math.min(...trips.map((trip) => trip.plannedDepartureMinute));
+    : Math.min(...trips.map((trip) => trip.effectiveDepartureMinute));
 }
 
 export function buildTrafficDemandIndex(
@@ -133,7 +133,7 @@ function getEligibilityTime(
 ): number {
   return Math.max(
     0,
-    (trip.plannedDepartureMinute - getWaveStartMinute(index, mode)) *
+    (trip.effectiveDepartureMinute - getWaveStartMinute(index, mode)) *
       index.catalog.demandSecondsPerPlannedMinute,
   );
 }
@@ -172,6 +172,7 @@ export function createPopulationTrafficState(
     queuedTripIds: [],
     nextQueuedTripIndex: 0,
     maximumQueueSize: 0,
+    consecutiveStoppedTicks: 0,
   };
 }
 

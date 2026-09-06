@@ -180,6 +180,7 @@ export function createInitialTrafficState(
     queuedTripIds: [],
     nextQueuedTripIndex: 0,
     maximumQueueSize: 0,
+    consecutiveStoppedTicks: 0,
   };
   return fillTrafficPopulation(state, network, config);
 }

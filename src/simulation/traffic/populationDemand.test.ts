@@ -29,6 +29,7 @@ function createCatalog(tripCount = 5): TrafficDemandCatalog {
       originBuildingId: 'home-building',
       destinationBuildingId: 'work-building',
       plannedDepartureMinute: index < 2 ? 480 : 480 + index,
+      effectiveDepartureMinute: index < 2 ? 480 : 480 + index,
       route: morningRoute,
     });
     trips.push({
@@ -38,6 +39,7 @@ function createCatalog(tripCount = 5): TrafficDemandCatalog {
       originBuildingId: 'work-building',
       destinationBuildingId: 'home-building',
       plannedDepartureMinute: 1_020 + index,
+      effectiveDepartureMinute: 1_020 + index,
       route: eveningRoute,
     });
   }
@@ -65,7 +67,7 @@ function createPopulationController(catalog = createCatalog()) {
 }
 
 describe('population traffic demand', () => {
-  it('sorts departures by planned minute then stable trip ID', () => {
+  it('sorts departures by frozen effective minute then stable trip ID', () => {
     const catalog = createCatalog(3);
     const index = buildTrafficDemandIndex({
       ...catalog,
@@ -84,6 +86,35 @@ describe('population traffic demand', () => {
     expect(state.tripRuntime.map((runtime) => runtime.tripId)).toEqual(
       index.morningTrips.map((trip) => trip.id),
     );
+  });
+
+  it('uses adapted effective minutes without mutating planned departures', () => {
+    const catalog = createCatalog(3);
+    const adapted: TrafficDemandCatalog = {
+      ...catalog,
+      trips: catalog.trips.map((trip) =>
+        trip.id === 'trip/citizen-002/work'
+          ? { ...trip, effectiveDepartureMinute: 470 }
+          : trip,
+      ),
+    };
+    const index = buildTrafficDemandIndex(adapted);
+    expect(index.morningTrips.map((trip) => trip.id)).toEqual([
+      'trip/citizen-002/work',
+      'trip/citizen-000/work',
+      'trip/citizen-001/work',
+    ]);
+    expect(index.morningTrips[0].plannedDepartureMinute).toBe(482);
+    expect(index.morningTrips[0].effectiveDepartureMinute).toBe(470);
+
+    const controller = createPopulationController(catalog);
+    controller.setDemandMode('morning-commute');
+    controller.setDemandCatalog(adapted);
+    expect(controller.state.demandMode).toBe('morning-commute');
+    expect(controller.state.tripRuntime[0].tripId).toBe(
+      'trip/citizen-002/work',
+    );
+    expect(controller.isPlaying).toBe(false);
   });
 
   it('retains excess eligible demand in an observable bounded queue', () => {
@@ -161,6 +192,7 @@ describe('population traffic demand', () => {
           citizenId: 'citizen-unreachable',
           purpose: 'commute-to-work',
           plannedDepartureMinute: 480,
+          effectiveDepartureMinute: 480,
         },
       ],
     };

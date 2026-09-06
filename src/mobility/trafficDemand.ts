@@ -27,6 +27,7 @@ export function createTrafficDemandCatalog(
         originBuildingId: trip.originBuildingId,
         destinationBuildingId: trip.destinationBuildingId,
         plannedDepartureMinute: trip.plannedDepartureMinute,
+        effectiveDepartureMinute: trip.plannedDepartureMinute,
         route: trip.route,
       });
     } else {
@@ -35,6 +36,7 @@ export function createTrafficDemandCatalog(
         citizenId: trip.citizenId,
         purpose: trip.purpose,
         plannedDepartureMinute: trip.plannedDepartureMinute,
+        effectiveDepartureMinute: trip.plannedDepartureMinute,
       });
     }
   }

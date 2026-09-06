@@ -154,6 +154,7 @@ function selectIntersectionWinners(
   proposals: readonly MovementProposal[],
   vehiclesByArc: ReadonlyMap<string, readonly Vehicle[]>,
   config: TrafficSimulationConfig,
+  forceGridlockBreak: boolean,
 ): Set<string> {
   const requestsByNode = new Map<RoadNodeId, IntersectionRequest[]>();
   for (const proposal of proposals) {
@@ -171,6 +172,15 @@ function selectIntersectionWinners(
       nextArcHasClearance(request, vehiclesByArc, config),
     );
     if (winner) winners.add(winner.vehicleId);
+  }
+
+  if (winners.size === 0 && forceGridlockBreak) {
+    const deterministicGridlockBreaker = proposals
+      .flatMap((proposal) => (proposal.request ? [proposal.request] : []))
+      .sort((first, second) => first.vehicleId.localeCompare(second.vehicleId))[0];
+    if (deterministicGridlockBreaker) {
+      winners.add(deterministicGridlockBreaker.vehicleId);
+    }
   }
   return winners;
 }
@@ -276,11 +286,13 @@ export function stepTrafficSimulation(
     proposals,
     vehiclesByArc,
     config,
+    (state.consecutiveStoppedTicks ?? 0) > 0,
   );
   const nextVehicles: Vehicle[] = [];
   let completedTrips = state.completedTrips;
   let totalCompletedTravelTime = state.totalCompletedTravelTime;
   const completedPopulationTrips: CompletedPopulationTrip[] = [];
+  let madeVehicleProgress = false;
   for (const proposal of proposals) {
     const queued =
       proposal.request !== undefined && !winners.has(proposal.vehicle.id);
@@ -296,6 +308,7 @@ export function stepTrafficSimulation(
       deltaSeconds,
     );
     if (result.completed) {
+      madeVehicleProgress = true;
       completedTrips += 1;
       totalCompletedTravelTime += result.completedTravelTime;
       if (proposal.vehicle.source === 'population' && proposal.vehicle.tripId) {
@@ -305,6 +318,12 @@ export function stepTrafficSimulation(
         });
       }
     } else if (result.vehicle) {
+      if (
+        result.vehicle.distanceTravelled >
+        proposal.vehicle.distanceTravelled + MOVEMENT_EPSILON
+      ) {
+        madeVehicleProgress = true;
+      }
       nextVehicles.push(result.vehicle);
     }
   }
@@ -317,6 +336,10 @@ export function stepTrafficSimulation(
     vehicles: nextVehicles,
     completedTrips,
     totalCompletedTravelTime,
+    consecutiveStoppedTicks:
+      state.vehicles.length > 0 && !madeVehicleProgress
+        ? (state.consecutiveStoppedTicks ?? 0) + 1
+        : 0,
   };
   if (state.demandMode === 'synthetic') {
     return fillTrafficPopulation(advancedState, network, config);

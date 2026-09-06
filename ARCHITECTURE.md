@@ -1,8 +1,8 @@
-# Phase 8 Architecture
+# Phase 9 Architecture
 
 ## Goal and deterministic contract
 
-Procedural City Generator has a deterministic physical city, a separately initialized synthetic population, deterministic daily mobility plans, a deterministic traffic simulation, and a separate wellbeing foundation. Phase 8 derives explainable static environmental exposure and consumes completed commute outcomes without adding emotional fields to `Citizen` or mutating the generated `World`, population, mobility plans, or traffic state.
+Procedural City Generator has a deterministic physical city, a separately initialized synthetic population, deterministic daily mobility plans, a deterministic traffic simulation, a separate wellbeing foundation, and an independent adaptive commute-behavior layer. Phase 9 closes the first controlled human-to-city feedback loop by shifting only future effective departure times. It does not add adaptive fields to `Citizen`, mutate `MobilityState`, rebuild routes, or change traffic physics.
 
 The project contract remains:
 
@@ -13,11 +13,13 @@ The project contract remains:
 (world, demand mode, simulation inputs, fixed tick count) -> traffic state
 (world, population, mobility identity, wellbeing version) -> wellbeing baseline
 (baseline, scenario seed, ordered completed commute events) -> wellbeing scenario state
+(mobility identity, behavior version) -> zero-offset behavior baseline
+(behavior round input, completed commute outcomes, wellbeing snapshot) -> next-round offsets
 ```
 
 For identical inputs, `generateWorld`, `generatePopulation`, and `generateMobility` return deeply identical, JSON-serializable data. None has a clock, browser, React, rendering, viewport, or ambient random-state dependency.
 
-`GENERATOR_VERSION` remains `phase-5.0`; population remains `phase-6.0`; mobility remains `phase-7.0`; traffic retains its compatible `phase-4.0` engine version; wellbeing has an independent `phase-8.0` model version and identity. Phase 8 does not change the fixed-tick movement model or physical-world generation. Under the existing root-seed convention, only a deliberate generated-world version change creates new physical geometry for the same textual seed. Historical generators and save migrations remain deferred until persistence requirements are known.
+`GENERATOR_VERSION` remains `phase-5.0`; population remains `phase-6.0`; mobility remains `phase-7.0`; traffic retains its compatible `phase-4.0` engine version; wellbeing remains `phase-8.0`; and behavior has an independent `phase-9.0` version and identity. Phase 9 changes neither the fixed-tick movement model nor physical-world generation. Under the existing root-seed convention, only a deliberate generated-world version change creates new physical geometry for the same textual seed. Historical generators and save migrations remain deferred until persistence requirements are known.
 
 ## Modules and boundaries
 
@@ -86,6 +88,15 @@ src/
     updateWellbeing.ts          idempotent scenario-state reducer and reset
     metrics.ts                  reusable aggregate score metrics
     queries.ts                  citizen explanations and building summaries
+  behavior/
+    config.ts                   centralized adaptation weights and bounds
+    initializeBehavior.ts      zero-offset purpose-specific baseline
+    commuteAdaptation.ts       pure friction/wellbeing response formula
+    behaviorEvents.ts          stable completed-commute event adapter
+    updateBehavior.ts          immutable idempotent event reducer
+    commuteRounds.ts           effective departures and explicit promotion
+    metrics.ts                 aggregate adaptation metrics
+    queries.ts                 selected-citizen behavior explanations
   simulation/traffic/
     trafficNetwork.ts           read-only road-to-routing adapter
     routing.ts                  deterministic travel-time A*
@@ -186,6 +197,8 @@ mobility/phase-7.0
 Adding or changing an unrelated citizen cannot shift another citizen's schedule. Mobility consumes no `Math.random`, timestamps, UUIDs, browser state, or shared mutable RNG. Its randomness cannot perturb the world, population, or synthetic traffic streams.
 
 Wellbeing derives identity from the generated-world, population, exposure, mobility, and `phase-8.0` version identities. Phase 8 currently consumes no random values: static exposure is a pure geometry/capacity query and commute response is a pure function of recorded trip outcomes. Scenario event IDs include the deterministic traffic simulation seed and stable trip ID, so replaying a completed event is harmless and resetting a scenario recreates the same baseline.
+
+Behavior derives identity from the mobility version, mobility seed, and `phase-9.0` behavior version. Phase 9 also consumes no random values. Its event identity includes the behavior seed, purpose, commute-round index, stable trip ID, and completion marker. It does not use `Math.random`, UUIDs, wall-clock timestamps, browser timing, frame timing, or a shared RNG stream. Replaying the same event is a domain-level no-op.
 
 ## Regional anchors and arterial strategy
 
@@ -455,12 +468,88 @@ The baseline route duration contributes a small chronic burden even when the tri
 
 Traffic reset or demand-mode change restores initial environmental scores, clears processed commute IDs, and starts a separate deterministic scenario. Morning and evening traffic seeds therefore cannot leak effects into each other. Aggregate queries expose citizen count, average/minimum/maximum scores, commute-affected citizen count, average absolute commute tension impact, home-building score summaries, and selected-citizen causal details.
 
+## Adaptive commute behavior and feedback loop
+
+Phase 9 adds a downstream `BehaviorState`; it does not turn wellbeing or population records into mutable agent objects. The first feedback loop is:
+
+```text
+World
+  ↓
+Population
+  ↓
+Mobility ──────────────┐
+  ↓                    │
+Traffic                 │
+  ↓                    │
+Commute outcome         │
+  ↓                    │
+Wellbeing               │
+  ↓                    │
+BehaviorState           │
+  ↓                    │
+next-round demand ──────┘
+```
+
+`MobilityState` remains immutable intent. Each purpose-specific behavior record retains a frozen `departureOffsetMinutes` and a learned `nextDepartureOffsetMinutes`. Effective demand is:
+
+```text
+effectiveDepartureMinute
+  = clamp(plannedDepartureMinute + departureOffsetMinutes, 0, 1439)
+```
+
+Round 0 initializes both offsets to zero, so effective and planned minutes are deeply equal to the Phase 7 demand catalog. Disabling behavior also forces a zero offset without deleting stored behavior, which supplies a direct baseline comparison. The adapter preserves both the planned and effective minute; only the effective minute determines queue ordering and eligibility. Home, workplace, purpose, trip ID, route arcs, distance, and expected route time remain unchanged.
+
+### Adaptation model
+
+The pure response uses normalized, inspectable signals:
+
+```text
+unexpected delay = clamp01(max(0, actual - estimated) / max(15, estimated) / 2)
+queue friction   = clamp01(queue wait / 180)
+chronic burden   = clamp01(estimated / 240)
+tension elevation = clamp01(max(0, current - initial tension) / 15)
+stress elevation  = clamp01(max(0, current - initial stress) / 20)
+
+pressure = clamp01(
+  unexpected delay * 0.52
+  + queue friction * 0.23
+  + chronic burden * 0.08
+  + tension elevation * 0.11
+  + stress elevation * 0.06
+)
+```
+
+Unexpected delay and queue friction therefore supply 75% of the maximum pressure; current wellbeing modulates rather than controls the decision. Happiness and calm do not drive departure timing. At pressure `>= 0.18`, the target is `-round(pressure * 25)` minutes. The next offset moves 45% toward a more-negative target, by at least one and at most six minutes in one round. Every offset is an integer clamped to `[-25, 0]`.
+
+At pressure `<= 0.08`, an existing earlier offset recovers three minutes toward zero. Pressure between `0.08` and `0.18` is a deadband: it neither adapts earlier nor recovers. Recovery cannot overshoot into leaving late. Long predictable travel contributes only the small chronic term, while unexpected delay and queueing dominate severe responses.
+
+### Commute-round lifecycle
+
+A commute round is an experimental replay of one commute purpose, not a full calendar day:
+
+```text
+Round N current offsets
+  → freeze effective demand catalog
+  → fixed-timestep traffic run
+  → completed commute events
+  → idempotent wellbeing updates
+  → idempotent next-offset behavior updates
+  → explicit round promotion
+  → Round N+1 frozen demand
+```
+
+Completions never write `departureOffsetMinutes`; they can update only `nextDepartureOffsetMinutes`. Consequently, early finishers cannot alter already scheduled or queued citizens in Round N. `advanceCommuteRound` promotes only the selected morning or evening purpose, records an aggregate round summary, increments that purpose's round index, and freezes a new catalog once. Morning and evening behavior are independent.
+
+Traffic/run reset pauses and recreates the current traffic state from the unchanged frozen catalog. It does not promote a round, and replay produces the same demand, queue order, traffic outcome, wellbeing events, and behavior events. Behavior reset recreates zero-offset Round 0 for both purposes. Synthetic traffic has no population commute provenance, creates no behavior event, and never advances a commute round.
+
+Behavior work is completion-driven, not performed per 50 ms traffic tick. React receives compact snapshots at existing boundaries; catalog regeneration occurs only on round promotion, behavior enable/disable, reset, or mobility replacement. Traffic movement and Canvas rendering import no behavior or wellbeing logic.
+
 ## Future simulation compatibility
 
 Future phases can query stable citizen/household/workplace identities, home and work buildings, household composition, workforce eligibility, building capacity and occupancy, daily activities, planned commute routes, exact road access, runtime trip status, actual travel/wait times, vehicle state, segment occupancy, cached environmental exposure, bounded wellbeing scores, factor contributions, and processed commute impacts without reconstructing Canvas geometry.
 
-Later systems can consume these explicit interfaces instead of scraping UI state or changing Phase 7 identity. Phase 8 intentionally stops at observation: scores do not yet alter citizen decisions, traffic demand, land use, employment, or city growth. A future city-day clock can execute the retained daily minutes without regenerating routines.
+Later systems can consume these explicit interfaces instead of scraping UI state or changing Phase 7 identity. Phase 9 changes only future effective commute departure timing; wellbeing still does not change speed, headway, intersection behavior, route choice, land use, employment, or city growth. A future city-day clock can consume the retained plans and purpose-specific offsets without regenerating routines.
 
 ## Intentionally deferred
 
-Phase 8 does not implement a continuous 24-hour city clock, non-work trips, schools as institutions, companies, professions, salaries, income, land value, rents, taxes, economic production, shopping, leisure behavior, pedestrians, public transport, parking, migration, birth/death, relationships, health diagnosis, personality, social contagion, long-term adaptation, recovery/decay, wellbeing-driven behavior, measured acoustics, or pollution feedback. Buildings, population, employment, and routines remain fixed after initialization. Existing physical-city limitations such as one building per parcel, no detailed architecture, bridges, grade separation, lanes, and coastline-generated blocks also remain. Opposing vehicles still share the visual road centerline. These are intentional scope boundaries.
+Phase 9 does not implement a continuous 24-hour city clock, alternate or dynamic routes, generalized schedule flexibility, driving personality, non-work trips, schools as institutions, companies, professions, salaries, income, land value, rents, taxes, economic production, shopping, leisure behavior, pedestrians, public transport, parking, relocation, job switching, migration, birth/death, relationships, health diagnosis, personality, social contagion, measured acoustics, or pollution feedback. Buildings, population, employment, mobility plans, routes, and driving physics remain fixed after initialization. Existing physical-city limitations such as one building per parcel, no detailed architecture, bridges, grade separation, lanes, and coastline-generated blocks also remain. Opposing vehicles still share the visual road centerline. These are intentional scope boundaries.
