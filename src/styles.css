@@ -171,6 +171,38 @@ h1 {
   box-shadow: 0 24px 70px rgb(0 0 0 / 25%);
 }
 
+.product-signature {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  color: #718097;
+  font-size: 0.72rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.product-signature-logo-frame {
+  position: relative;
+  display: block;
+  width: 84.6px;
+  height: 22px;
+  flex: 0 0 84.6px;
+  overflow: hidden;
+}
+
+.product-signature-logo {
+  position: absolute;
+  top: -18.34px;
+  left: -14.76px;
+  display: block;
+  width: 113.8px;
+  height: 56.9px;
+  max-width: none;
+}
+
 .viewport-toolbar {
   display: flex;
   min-height: 72px;
@@ -509,6 +541,10 @@ h1 {
 @media (max-width: 620px) {
   .app-shell {
     padding-inline: 12px;
+  }
+
+  .product-signature {
+    justify-content: center;
   }
 
   .controls {

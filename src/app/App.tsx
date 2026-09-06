@@ -18,6 +18,7 @@ import {
   explainCitizenWellbeing,
 } from '../wellbeing/queries';
 import type { WellbeingDimension } from '../wellbeing/types';
+import { ProductSignature } from '../ui/ProductSignature';
 
 export function App() {
   const { seedInput, setSeedInput, world, generate, randomize } = useWorldGeneration();
@@ -229,6 +230,7 @@ export function App() {
           />
         </div>
       </section>
+      <ProductSignature />
     </main>
   );
 }
